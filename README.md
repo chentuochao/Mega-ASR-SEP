@@ -11,40 +11,56 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-green">
 </p>
 
+
 ## Introduction
 
-Mega-ASR is a robust automatic speech recognition project designed for in-the-wild speech recognition. It focuses on improving ASR performance under complex real-world acoustic conditions, including background noise, reverberation, far-field speech, distortion, echo, re-recording, crosstalk, and other degraded audio scenarios.
+Mega-ASR is a speech recognition model designed for complex dirty speech scenarios, including noise, far-field speech, distortion, stuttering, echo, obstruction, and mixed acoustic interference. Compared with general-purpose ASR models, Mega-ASR focuses on stable recognition under medium- and high-error-rate audio conditions, achieving lower word error rates (WER) on challenging real-world speech.
 
-Unlike conventional ASR systems that mainly target clean or moderately noisy speech, Mega-ASR emphasizes stable recognition in medium- and high-difficulty acoustic conditions, where speech content may be partially corrupted, masked, or distorted.
+This open-source release includes model weights, core training data, and newly constructed evaluation datasets, enabling researchers and developers to reproduce results, evaluate robustness, and advance ASR research in complex acoustic environments.
 
 This repository is currently under active development.
 
 ## Highlights
 
-- Robust ASR for complex real-world acoustic scenarios.
-- Support for dirty audio and general audio inference.
-- SFT-LoRA training pipeline for acoustic robustness adaptation.
-- Standard WER evaluation script.
-- Modular code organization for training, inference, and evaluation.
-- DAPO-LoRA training module will be released in a future version.
+
+- **Dirty and general ASR support**: robust recognition for both in-the-wild dirty speech and general audio.
+- **550K-scale dirty speech corpus**: a large-scale degraded speech corpus covering noise, far-field speech, distortion, stuttering, echo, obstruction, and mixed acoustic interference.
+- **SFT + RL robustness training**: a two-stage pipeline for improving recognition stability under complex acoustic conditions.
+- **WER evaluation toolkit**: standard scripts for reproducible ASR robustness evaluation.
+- **DAPO-LoRA roadmap**: reinforcement learning training code will be released in a future update.
 
 ## Project Structure
 
 ```text
 Mega-ASR/
 ├─ assets/
+│  └─ Figures, logos, and other README resources.
+│
 ├─ configs/
-├─ data/                         # ignored by git
+│  └─ Configuration files for SFT-LoRA and DAPO-LoRA training.
+│
+├─ data/
+│  └─ Local data directory. Large-scale audio data is not tracked by Git.
+│
 ├─ eval/
 │  └─ evaluate_wer.py
+│     WER/CER evaluation utilities for ASR robustness testing.
+│
 └─ src_MegaASR/
    ├─ inference/
    │  ├─ inference_MegaASR_for_dirty.py
+   │  │  Dirty-speech inference without routing, designed for degraded audio.
+   │  │
    │  └─ inference_MegaASR_for_all.py
+   │     General inference with routing, supporting both dirty and general audio.
+   │
    └─ train/
       ├─ SFT_lora/
       │  └─ SFT_lora.py
-      └─ DAPO_lora/              # not released yet
+      │     SFT-LoRA training pipeline for acoustic robustness adaptation.
+      │
+      └─ DAPO_lora/
+         └─ DAPO-LoRA training module, to be released in a future update.
 ```
 
 ## Installation
