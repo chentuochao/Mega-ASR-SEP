@@ -29,7 +29,6 @@ checkpoints/
 *.onnx
 
 # Data and audio files
-data/
 datasets/
 *.wav
 *.flac
