@@ -245,11 +245,10 @@ python scripts/download.py
 
 **Offline Inference**
 ```bash
+# infer with default audio
 bash scripts/inference.sh
-```
 
-Use your own audio:
-```bash
+#Use your own audio:
 bash scripts/inference.sh --audio /path/to/audio.wav
 ```
 
@@ -381,6 +380,9 @@ Each input line requires `audio_path` and `answer` (ground-truth transcription).
 
 ## Acknowledgements
 
+We sincerely thank the creators, maintainers, and contributors of the public datasets used in this work, including MUSAN, DNS Challenge, ESC-50, UrbanSound8K, LibriSpeech, Common Voice, WenetSpeech, and AISHELL-1.
+
+We also sincerely thank the Qwen3-ASR Team for developing such an excellent foundation model, which provides a strong backbone for this work.
 
 ## Licence, Citation and stars
 This project will be released under the **Apache-2.0 License**. You can do everything with Mega-ASR 🎉
