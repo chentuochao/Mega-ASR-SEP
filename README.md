@@ -225,33 +225,32 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 * **[Evaluation](#evaluation)**
 * **[Citation and licence](#citation)**
 
-
 ## Quick Start
 
 
 **Installation**
 ```bash
-git clone https://github.com/QwenLM/Qwen3-ASR.git
-conda create -n mega-asr2 python=3.12 -y
-conda activate mega-asr2
+git clone https://github.com/xzf-thu/Mega-ASR.git
+cd Mega-ASR
 
-pip install torch==2.10.0 torchaudio==2.10.0 torchvision==0.25.0
-pip install -r mega_asr_requirements.txt
-pip install -e /path/to/Qwen3-ASR --no-deps
+conda create -n mega-asr python=3.10 -y
+conda activate mega-asr
+pip install -r requirements.txt
 ```
-**Download**
+
+**Download Weights**
 ```bash
-git clone https://github.com/QwenLM/Qwen3-ASR.git
+python scripts/download.py
 ```
 
 **Offline Inference**
 ```bash
-git clone https://github.com/QwenLM/Qwen3-ASR.git
+bash scripts/inference.sh
 ```
 
-**WEBUI**
+Use your own audio:
 ```bash
-git clone https://github.com/QwenLM/Qwen3-ASR.git
+bash scripts/inference.sh --audio /path/to/audio.wav
 ```
 
 
@@ -398,11 +397,10 @@ This project will be released under the **Apache-2.0 License**. You can do every
 }
 ```
 
-<a href="https://www.star-history.com/?repos=mega-asr%2Fmega-asr&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=gpt-omni%2Fmini-omi%2Cxzf-thu%2FMega-ASR&type=date&legend=bottom-right">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=mega-asr/mega-asr&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=mega-asr/mega-asr&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mega-asr/mega-asr&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=gpt-omni/mini-omi%2Cxzf-thu/Mega-ASR&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=gpt-omni/mini-omi%2Cxzf-thu/Mega-ASR&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=gpt-omni/mini-omi%2Cxzf-thu/Mega-ASR&type=date&legend=bottom-right" />
  </picture>
 </a>
-
