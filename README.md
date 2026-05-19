@@ -267,11 +267,22 @@ git clone https://github.com/QwenLM/Qwen3-ASR.git
 
 Mega-ASR supports robustness adaptation through supervised fine-tuning (A2S-SFT) and reinforcement learning (DG-WGPO).
 
-```bash
-bash
+### A2S-SFT
 
+
+`src/MegaASR/A2S-SFT` contains the core training code for Mega-ASR A2S-SFT. 
+
+```text
+src/MegaASR/A2S-SFT/
+├── arguments.py      # Defines command-line arguments and training hyperparameters.
+├── checkpointing.py  # Saves base-model metadata and required processor/tokenizer files for LoRA reuse.
+├── dataloader.py     # Loads JSONL data, reads audio, builds model inputs, and masks non-target tokens.
+├── finetune.py       # Main entry point for launching A2S-SFT training.
+├── modeling.py       # Loads Qwen3-ASR and defines LoRA injection scopes.
+├── trainer.py        # Defines MegaASRTrainer with adapter-only saving and module-wise learning rates.
 ```
 
+```
 Training data is in JSONL format:
 
 ```json
@@ -280,6 +291,21 @@ Training data is in JSONL format:
   "text": "language English<asr_text>THE TRANSCRIPT TEXT",
   "prompt": ""
 }
+```
+
+We can use the following command to start it.
+
+```bash
+torchrun --nproc_per_node=2 A2S_SFT/finetune.py \
+  --model_path Qwen3-ASR-1.7B --train_file ${TRAIN_JSONL} \
+  --eval_file ${VAL_JSONL} --output_dir ${OUT_DIR} \
+  --batch_size 8 --grad_acc 8 \
+  --lr 1e-6 --lr_encoder 1e-6 --lr_aligner 1e-6 --lr_llm 1e-6 \
+  --epochs 2 --save_steps 200 --save_total_limit 300 --use_lora 1 \
+  --lora_scope all --lora_r 8 --lora_alpha 16 --lora_dropout 0.05 \
+  --warmup_ratio 0.05 --max_grad_norm 1.0  --weight_decay 0.01 \
+  --run_name ${RUN_NAME} --report_to wandb \
+  2>&1 | tee -a ${LOG_FILE}
 ```
 
 The DG-WGPO reinforcement learning module will be released in a future update.
