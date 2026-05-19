@@ -317,12 +317,12 @@ class LoRADeltaSwitch:
 class Qwen3ASRRouter:
     def __init__(
         self,
-        model_path: str = "/data/haobin/Qwen3-ASR/Qwen3-ASR-1.7B",
-        lora_b_dir: str = "/data/haobin/open/lora/lora1",
-        lora_c_dir: str = "/data/haobin/open/lora/lora2",
-        lora_d_dir: str = "/data/haobin/open/lora/lora3",
-        quality_model_dir: str = "/data/haobin/audio_quality_classifier_dataset/audio_quality_classifier",
-        quality_checkpoint: str = "/data/haobin/audio_quality_classifier_dataset/audio_quality_classifier/runs/exp_20260211_1layer/best_acc_model.pt",
+        model_path: str = "ckpt/Mega-ASR/Qwen3-ASR-1.7B",
+        lora_b_dir: str = "ckpt/Mega-ASR/A2S-SFT-lora/lora1",
+        lora_c_dir: str = "ckpt/Mega-ASR/A2S-SFT-lora/lora2",
+        lora_d_dir: str = "ckpt/Mega-ASR/A2S-SFT-lora/lora1",
+        quality_model_dir: str = "ckpt/Mega-ASR/router",
+        quality_checkpoint: str = "ckpt/Mega-ASR/router/runs/exp_20260211_1layer/best_acc_model.pt",
         quality_threshold: float = 0.5,
         routing_enabled: bool = True,
         device_map: str = "cuda:0",
@@ -493,21 +493,21 @@ def main():
     parser = argparse.ArgumentParser(description="Clean Qwen3-ASR router single-audio inference.")
 
     parser.add_argument("--audio", type=str, required=True, help="输入音频路径。")
-    parser.add_argument("--model_path", type=str, default="/data/haobin/Qwen3-ASR/Qwen3-ASR-1.7B")
+    parser.add_argument("--model_path", type=str, default="ckpt/Mega-ASR/Qwen3-ASR-1.7B")
 
-    parser.add_argument("--lora_b_dir", type=str, default="/data/haobin/open/lora/lora1")
-    parser.add_argument("--lora_c_dir", type=str, default="/data/haobin/open/lora/lora2")
-    parser.add_argument("--lora_d_dir", type=str, default="/data/haobin/open/lora/lora3")
+    parser.add_argument("--lora_b_dir", type=str, default="ckpt/Mega-ASR/A2S-SFT-lora/lora1")
+    parser.add_argument("--lora_c_dir", type=str, default="ckpt/Mega-ASR/A2S-SFT-lora/lora2")
+    parser.add_argument("--lora_d_dir", type=str, default="ckpt/Mega-ASR/A2S-SFT-lora/lora3")
 
     parser.add_argument(
         "--quality_model_dir",
         type=str,
-        default="/data/haobin/audio_quality_classifier_dataset/audio_quality_classifier",
+        default="ckpt/Mega-ASR/router",
     )
     parser.add_argument(
         "--quality_checkpoint",
         type=str,
-        default="/data/haobin/audio_quality_classifier_dataset/audio_quality_classifier/runs/exp_20260211_1layer/best_acc_model.pt",
+        default="ckpt/Mega-ASR/router/runs/exp_20260211_1layer/best_acc_model.pt",
     )
     parser.add_argument("--quality_threshold", type=float, default=0.5)
 

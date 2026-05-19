@@ -19,9 +19,9 @@ except ImportError:
 # ================================
 # 固定路径
 # ================================
-INPUT_DIR = "/data/pangkaiyu/dg/dataset_1w"
-OUTPUT_DIR = "/data/haobin/Voices-in-the-Wild_54c"
-NOISES_DIR = "/data/haobin/noises"
+INPUT_DIR = "dataset_clean"
+OUTPUT_DIR = "Voices-in-the-Wild_54c"
+NOISES_DIR = "noises"
 EFFECTS_PACKAGE = "effects"
 USE_GLOBAL_M = True
 

@@ -453,7 +453,7 @@ def main():
         help="Root directory for relative audio paths such as examples/noise.wav.",
     )
 
-    parser.add_argument("--model_path", type=str, default="/data/haobin/Qwen3-ASR/Qwen3-ASR-1.7B")
+    parser.add_argument("--model_path", type=str, default=" ckpt/Mega-ASR/Qwen3-ASR-1.7B")
     parser.add_argument("--adapter_dir", type=str, default="")
     parser.add_argument("--gpus", type=str, default="0", help='Comma-separated GPU ids, e.g. "0" or "0,1,2,3". Use "cpu" for CPU.')
     parser.add_argument("--batch_size", type=int, default=8)

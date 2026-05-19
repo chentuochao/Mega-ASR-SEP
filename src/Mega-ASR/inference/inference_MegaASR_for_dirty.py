@@ -3,9 +3,9 @@
 """
 Clean version: Qwen3-ASR merged model single-audio inference with language output.
 
-加载方式对应你的 Qwen3-ASR-1_7B-0514-merged_v2 版本：
+加载方式对应你的  ckpt/Mega-ASR/Mega-ASR_for_dirty  版本：
 - 模型路径默认：
-  /data/haobin/Qwen3-ASR/Qwen3-ASR-1.7B-lora-merged_v2
+   ckpt/Mega-ASR/Mega-ASR_for_dirty 
 
 默认只输出必要内容：
 1. 初始化完成提示
@@ -76,7 +76,7 @@ class Qwen3ASRMerged:
 
     def __init__(
         self,
-        model_path: str = "/data/haobin/Qwen3-ASR/Qwen3-ASR-1.7B-lora-merged_v2",
+        model_path: str = " ckpt/Mega-ASR/Mega-ASR_for_dirty",
         device_map: str = "cuda:0",
         max_inference_batch_size: int = 32,
         max_new_tokens: int = 256,
@@ -181,7 +181,7 @@ def main():
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/data/haobin/Qwen3-ASR/Qwen3-ASR-1.7B-lora-merged_v2",
+        default=" ckpt/Mega-ASR/Mega-ASR_for_dirty ",
         help="merged 模型路径。",
     )
     parser.add_argument("--device_map", type=str, default="cuda:0")

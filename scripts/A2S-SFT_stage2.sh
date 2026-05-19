@@ -28,23 +28,23 @@ torchrun --nproc_per_node=2 --master_port=29505 train.py \
   --train_file ${TRAIN_JSONL} \
   --eval_file ${VAL_JSONL} \
   --output_dir ${OUT_DIR} \
-  --batch_size 8 \
-  --grad_acc 4 \
-  --lr 1e-6 \
-  --lr_tower 2e-5 \
-  --lr_proj 5e-5 \
-  --lr_llm 5e-6 \
-  --epochs 2 \
-  --save_steps 500 \
-  --save_total_limit 300 \
-  --use_lora 1 \
+  --batch_size <BATCH_SIZE> \
+  --grad_acc <GRAD_ACC> \
+  --lr <LR> \
+  --lr_tower <LR_TOWER> \
+  --lr_proj <LR_PROJ> \
+  --lr_llm <LR_LLM> \
+  --epochs <EPOCHS> \
+  --save_steps <SAVE_STEPS> \
+  --save_total_limit <SAVE_TOTAL_LIMIT> \
+  --use_lora <USE_LORA> \
   --lora_scope llm \
-  --lora_r 8 \
-  --lora_alpha 16 \
-  --lora_dropout 0.05 \
-  --warmup_ratio 0.05 \
-  --max_grad_norm 1.0 \
-  --weight_decay 0.01 \
+  --lora_r <LORA_R> \
+  --lora_alpha <LORA_ALPHA> \
+  --lora_dropout <LORA_DROPOUT> \
+  --warmup_ratio <WARMUP_RATIO> \
+  --max_grad_norm <MAX_GRAD_NORM> \
+  --weight_decay <WEIGHT_DECAY> \
   --run_name ${RUN_NAME} \
   --use_fixed_ratio_sampler 1 \
   --merge_lora_into_base_from <The previous training checkpoint> \

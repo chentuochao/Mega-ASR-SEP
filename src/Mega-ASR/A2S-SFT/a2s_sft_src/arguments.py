@@ -17,11 +17,11 @@ def parse_args():
     # Train hyper-params
     p.add_argument("--batch_size", type=int, default=32)
     p.add_argument("--grad_acc", type=int, default=4)
-    p.add_argument("--lr", type=float, default=2e-5)
+    p.add_argument("--lr", type=float, default=1e-5)
     # 不同模块不同学习率
-    p.add_argument("--lr_tower", type=float, default=1e-4)
-    p.add_argument("--lr_proj", type=float, default=3e-4)
-    p.add_argument("--lr_llm", type=float, default=5e-5)
+    p.add_argument("--lr_tower", type=float, default=1e-5)
+    p.add_argument("--lr_proj", type=float, default=1e-5)
+    p.add_argument("--lr_llm", type=float, default=1e-5)
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--epochs", type=float, default=1)
     p.add_argument("--log_steps", type=int, default=10)

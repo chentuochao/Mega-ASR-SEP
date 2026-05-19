@@ -205,7 +205,7 @@ def main():
         default=None,
         help=(
             "Root directory used to preserve relative paths. "
-            "Example: /data/haobin/open/datasets/LibriSpeech_test/LibriSpeech"
+            "Example: datasets/LibriSpeech_test/LibriSpeech"
         ),
     )
     parser.add_argument("--sr", type=int, default=16000)

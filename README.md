@@ -488,6 +488,26 @@ CUDA_VISIBLE_DEVICES=6,7 python evaluate_wer.py \
 ```
 
 
+## Dirty Speech Data Generation
+
+The data generation code for our Voices-in-the-Wild training data is provided under:
+
+```text
+dataset/dataloader/
+```
+
+The core scheduling entry is:
+
+```text
+dataset/dataloader/scheduler.py
+```
+
+This module is responsible for organizing the data generation workflow and scheduling different data construction components.
+
+Please note that the detailed implementations of individual perturbation functions, as well as the exact parameter settings used for single or mixed acoustic corruptions, are not included in this public release. These components are currently closed-source. The released dataloader code mainly provides the overall data scheduling interface and the public structure used in our training pipeline.
+
+
+
 
 ## Finetune
 
@@ -504,6 +524,36 @@ bash A2S-SFT_stage1.sh
 bash A2S-SFT_stage2.sh
 bash A2S-SFT_stage3.sh
 ```
+
+
+#### Hyperparameter Configuration
+
+The following training hyperparameters are exposed as placeholders in the public script. Users should set them according to their own dataset scale, GPU memory, LoRA configuration, and training objective.
+
+```bash
+--batch_size <BATCH_SIZE> \
+--grad_acc <GRAD_ACC> \
+--lr <LR> \
+--lr_tower <LR_TOWER> \
+--lr_proj <LR_PROJ> \
+--lr_llm <LR_LLM> \
+--epochs <EPOCHS> \
+--save_steps <SAVE_STEPS> \
+--save_total_limit <SAVE_TOTAL_LIMIT> \
+--use_lora <USE_LORA> \
+--lora_scope <LORA_SCOPE> \
+--lora_r <LORA_R> \
+--lora_alpha <LORA_ALPHA> \
+--lora_dropout <LORA_DROPOUT> \
+--warmup_ratio <WARMUP_RATIO> \
+--max_grad_norm <MAX_GRAD_NORM> \
+--weight_decay <WEIGHT_DECAY>
+```
+
+Here, `<LR_TOWER>`, `<LR_PROJ>`, and `<LR_LLM>` correspond to the learning rates of different LoRA parameter groups. We do not provide fixed default values for these hyperparameters, since they are sensitive to the training data, corruption distribution, batch size, and target LoRA scope.
+
+Please record the final hyperparameter values used in your own experiments for reproducibility.
+
 
 #### Training Data Format
 
@@ -566,24 +616,6 @@ The converted output JSONL follows the training format required by Mega-ASR:
 ```
 
 This script is mainly intended for converting LibriSpeech-style metadata into the unified Mega-ASR SFT format. It can also be used as a reference for preparing custom ASR training data.
-
-#### Dirty Speech Data Generation
-
-The data generation code for our Voices-in-the-Wild training data is provided under:
-
-```text
-dataset/dataloader/
-```
-
-The core scheduling entry is:
-
-```text
-dataset/dataloader/scheduler.py
-```
-
-This module is responsible for organizing the data generation workflow and scheduling different data construction components.
-
-Please note that the detailed implementations of individual perturbation functions, as well as the exact parameter settings used for single or mixed acoustic corruptions, are not included in this public release. These components are currently closed-source. The released dataloader code mainly provides the overall data scheduling interface and the public structure used in our training pipeline.
 
 
 ### 2. DG-WGPO

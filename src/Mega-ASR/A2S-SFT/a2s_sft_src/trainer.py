@@ -79,9 +79,9 @@ class MultiLRAdapterTrainer(AdapterOnlyTrainer):
         processor=None,
         base_model_path: str = "",
         merged_from_lora_path: str = "",
-        lr_tower: float = 1e-4,
-        lr_proj: float = 3e-4,
-        lr_llm: float = 5e-5,
+        lr_tower: float = 1e-5,
+        lr_proj: float = 1e-5,
+        lr_llm: float = 1e-5,
         **kwargs,
     ):
         super().__init__(
