@@ -41,7 +41,7 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 ### Comparison with SOTA open-source and closed-source models.
 
 #### Sample 1
-
+---
 <div align="center">
   <video src="https://private-user-images.githubusercontent.com/201621992/594835233-2d847f22-a6d4-4d84-9bec-79a39001f9ca.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzkyMDU0NDYsIm5iZiI6MTc3OTIwNTE0NiwicGF0aCI6Ii8yMDE2MjE5OTIvNTk0ODM1MjMzLTJkODQ3ZjIyLWE2ZDQtNGQ4NC05YmVjLTc5YTM5MDAxZjljYS5tcDQ_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwNTE5JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDUxOVQxNTM5MDZaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1mODgyYWRlZGI3OThjZWZmNzg1ZDhmNDRiNDMxZjYzZmE0Njk5OWJjYWJkZTVhZmM0OTM0OTI4MWI3ZmEzMGI0JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9dmlkZW8lMkZtcDQifQ.qJS-ALDMknvRYFY73hGYmJ-WLzwtC4LRHJnHXlkpyyU" controls width="300"></video>
 </div>
@@ -219,6 +219,7 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 
 
 ## 🔥News
+---
 
 - **May 21, 2025**: 🔥 We release **Voices-in-the-Wild-Bench**, a benchmark for in-the-wild ASR robustness evaluation.
 - **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-2M**.
@@ -227,6 +228,7 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 - **May 19, 2025**: 🔥 We release the **Mega-ASR Technical Report**.
 
 ## Overview
+---
 
 * **[Quick Start](#quick-start)**
 * **[Introduction](#inference)**
@@ -237,6 +239,7 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 
 
 ## Quick Start
+---
 
 **Installation**
 ```bash
@@ -265,13 +268,14 @@ git clone https://github.com/QwenLM/Qwen3-ASR.git
 
 
 ## Introduction
+---
 
 **MEGA-ASR** is purpose-built for **full-scenario robust ASR in the wild**, especially excelling at **semantic recovery** and **local keyword reconstruction** under severe acoustic degradation. It substantially reduces common failure modes such as **hallucinations**, **empty outputs**, and **dropped utterances**, making speech recognition reliable in truly challenging real-world environments.
 <p align="center">
   <img src="assets/figures/radar_results.png" alt="Results" width="100%">
 </p>
 
-#### Features 
+### Features 
 ✅ **One model for the messy real world**: Covers **7 atomic acoustic conditions** and **54 compound acoustic scenarios** in a single model.
 
 ✅ **Stronger recovery under severe distortion**: Excels at **semantic recovery** and **local keyword reconstruction**, greatly reducing **hallucinations**, **empty outputs**, and **dropped utterances**.
@@ -283,6 +287,7 @@ git clone https://github.com/QwenLM/Qwen3-ASR.git
 
 
 ## Finetuning
+---
 
 Mega-ASR supports robustness adaptation through supervised fine-tuning (A2S-SFT) and reinforcement learning (DG-WGPO).
 
@@ -330,7 +335,7 @@ torchrun --nproc_per_node=2 A2S_SFT/finetune.py \
 The DG-WGPO reinforcement learning module will be released in a future update.
 
 ## Evaluation
-
+---
 <p align="center">
   <img src="/docs/assets/training.png" alt="Mega-ASR Training" width="100%">
 </p>
@@ -363,13 +368,11 @@ Each input line requires `audio_path` and `answer` (ground-truth transcription).
 
 
 ## Acknowledgements
-
-
-## License
+---
+## Licence, Citation and stars
+### License
 This project will be released under the Apache-2.0 License.
-
-
-## Citation and stars
+### Citation
 ```bash
 @article{xie2024mini,
   title={Mini-omni: Language models can hear, talk while thinking in streaming},
