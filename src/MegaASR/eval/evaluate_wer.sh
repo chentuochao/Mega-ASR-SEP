@@ -1,3 +1,4 @@
- CUDA_VISIBLE_DEVICES=6,7 python evaluate_wer.py \
-  --input_jsonl example/examples.jsonl \
-  --output_jsonl output_with_wer.jsonl 
+python eval/evaluate_wer.py \
+  --model_path Qwen3-ASR-1.7B \
+  --input_jsonl examples.jsonl \
+  --output_jsonl output_with_wer.jsonl

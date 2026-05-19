@@ -7,3 +7,8 @@ psutil
 matplotlib
 soundfile
 streamlit
+peft
+datasets
+wandb
+whisper_normalizer
+editdistance
