@@ -11,7 +11,7 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 
 
 <p align="center">
-  <a href="https://arxiv.org/pdf/2508.15827">Technical Report 📖</a> /
+  <a href="https://arxiv.org/abs/2605.19833">Technical Report 📖</a> /
   <a href="https://huggingface.co/datasets/zhifeixie/Voices-in-the-Wild-2M">Voices-in-the-wild-2M 🤗</a> /
   <a href="https://huggingface.co/zhifeixie/Mega-ASR">Mega-ASR Weights 🤗</a> /
   <a href="https://github.com/xzf-thu/Voices-in-the-Wild-Bench">Voices-in-the-Wild-Bench 🏆</a>
@@ -208,8 +208,10 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 
 ## 🔥News
 
-
-- **May 21, 2025**: 🔥 We release **Voices-in-the-Wild-Bench**, a benchmark for in-the-wild ASR robustness evaluation.
+[Coming]: We are going to release RL code and optimize WebUI.
+[Coming]: Dataset and benchmark will be reformatted to be clearer.
+[Coming]: We will release all the data process pipeline.
+- **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-Bench**, a benchmark for in-the-wild ASR robustness evaluation.
 - **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-2M**.
 - **May 20, 2025**: 🔥 We release the **Mega-ASR Inference and Training Codebase**.
 - **May 19, 2025**: 🔥 **Mega-ASR** model weights are now available on Hugging Face.
