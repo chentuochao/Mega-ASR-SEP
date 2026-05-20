@@ -402,7 +402,6 @@ This project will be released under the **Apache-2.0 License**. You can do every
   year={2024}
 }
 ```
-
 <a href="https://www.star-history.com/?repos=gpt-omni%2Fmini-omi%2Cxzf-thu%2FMega-ASR&type=date&legend=bottom-right">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=gpt-omni/mini-omi%2Cxzf-thu/Mega-ASR&type=date&theme=dark&legend=bottom-right" />
