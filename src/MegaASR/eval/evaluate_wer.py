@@ -71,7 +71,7 @@ def main():
 
     for i in tqdm(range(0, len(data), BATCH_SIZE), desc="evaluating"):
         batch = data[i:i + BATCH_SIZE]
-        audio_paths = [resolve_audio(x["audio_path"], args.input_jsonl) for x in batch]
+        audio_paths = [resolve_audio(x["audio"], args.input_jsonl) for x in batch]
         results = model.transcribe(audio=audio_paths, language=None)
         results = results if isinstance(results, list) else [results]
         for item, res in zip(batch, results):
