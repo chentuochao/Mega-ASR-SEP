@@ -208,9 +208,9 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 
 ## 🔥News
 
-[Coming]: We are going to release RL code and optimize WebUI.
-[Coming]: Dataset and benchmark will be reformatted to be clearer.
-[Coming]: We will release all the data process pipeline.
+- [Coming]: We are going to release RL code and optimize WebUI.
+- [Coming]: Dataset and benchmark will be reformatted to be clearer.
+- [Coming]: We will release all the data process pipeline.
 - **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-Bench**, a benchmark for in-the-wild ASR robustness evaluation.
 - **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-2M**.
 - **May 20, 2025**: 🔥 We release the **Mega-ASR Inference and Training Codebase**.
