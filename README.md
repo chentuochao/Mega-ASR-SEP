@@ -211,11 +211,11 @@ We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scena
 - [Coming]: We are going to release RL code and optimize WebUI.
 - [Coming]: Dataset and benchmark will be reformatted to be clearer.
 - [Coming]: We will release all the data process pipeline.
-- **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-Bench**, a benchmark for in-the-wild ASR robustness evaluation.
-- **May 20, 2025**: 🔥 We release **Voices-in-the-Wild-2M**.
-- **May 20, 2025**: 🔥 We release the **Mega-ASR Inference and Training Codebase**.
-- **May 19, 2025**: 🔥 **Mega-ASR** model weights are now available on Hugging Face.
-- **May 19, 2025**: 🔥 We release the **Mega-ASR Technical Report**.
+- **May 20, 2026**: 🔥 We release **Voices-in-the-Wild-Bench**, a benchmark for in-the-wild ASR robustness evaluation.
+- **May 20, 2026**: 🔥 We release **Voices-in-the-Wild-2M**.
+- **May 20, 2026**: 🔥 We release the **Mega-ASR Inference and Training Codebase**.
+- **May 19, 2026**: 🔥 **Mega-ASR** model weights are now available on Hugging Face.
+- **May 19, 2026**: 🔥 We release the **Mega-ASR Technical Report**.
 
 ## Overview
 
