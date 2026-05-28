@@ -11,7 +11,7 @@
   </a>
 </div>
 
-We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scenario robust speech recognition in the wild** through systematic training on **7 atomic acoustic conditions** and **54 compound acoustic scenarios**. Built on **2.6M training samples** covering **noise, far-field speech, obstruction, echo and reverberation, recording artifacts, electronic distortion, and transmission dropout**, MEGA-ASR uses **A2S-SFT** and **DG-WGPO based RL** to achieve **up to nearly 30% gains** over leading open and closed source SOTA models in challenging acoustic environments. If you like us, please give us a star✨.
+We introduce **MEGA-ASR**, the first foundation ASR model to target **full-scenario robust speech recognition in the wild** through systematic training on **7 atomic acoustic conditions** and **54 compound acoustic scenarios**. Built on **2.4M training samples** covering **noise, far-field speech, obstruction, echo and reverberation, recording artifacts, electronic distortion, and transmission dropout**, MEGA-ASR uses **A2S-SFT** and **DG-WGPO based RL** to achieve **up to nearly 30% gains** over leading open and closed source SOTA models in challenging acoustic environments. If you like us, please give us a star✨.
 
 <p align="center"><u><em>You’ll come back to Mega-ASR — after finding the rest fail in the real world.</em></u></p>
 
