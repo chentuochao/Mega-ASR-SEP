@@ -315,11 +315,16 @@ into Qwen3-ASR's streaming API:
 python infer_vllm_streaming.py \
   --audio assets/example/streaming_long_example.wav \
   --step_ms 1000 \
+  --reset_interval_sec 120 \
+  --overlap_sec 2 \
   --max_new_tokens 32
 ```
 
 The script prints partial text after each streaming call and a final transcript
-after `finish_streaming_transcribe`.
+after `finish_streaming_transcribe`. For long audio, it periodically finishes
+and re-initializes Qwen3-ASR's streaming state so the internally accumulated
+audio does not grow without bound. Set `--reset_interval_sec 0` to disable
+state resets.
 
 
 ## Introduction
