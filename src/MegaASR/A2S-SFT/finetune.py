@@ -45,7 +45,9 @@ def build_training_args(args, use_bf16: bool):
 def main():
     args = parse_args()
 
-    model, processor, use_bf16 = load_qwen3_asr(args.model_path)
+    model, processor, use_bf16 = load_qwen3_asr(
+        args.model_path, use_fusion=bool(args.use_fusion), fusion_type=args.fusion_type
+    )
 
     if args.padding_side != "auto":
         processor.tokenizer.padding_side = args.padding_side

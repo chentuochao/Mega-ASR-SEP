@@ -26,7 +26,20 @@ class Qwen3ASRCollator:
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         prompts = [x.get("prompt", "") for x in features]
         targets = [x["text"] for x in features]
-        audios = [read_audio(x["audio"], self.sampling_rate) for x in features]
+
+        # Separated stream is the primary input. Accept the legacy single-stream
+        # key "audio" as an alias for "audio_sep" so old manifests still load.
+        sep_paths = [x.get("audio_sep", x.get("audio")) for x in features]
+        audios = [read_audio(p, self.sampling_rate) for p in sep_paths]
+
+        # Mixture (pre-separation) stream, optional. Fusion only kicks in when
+        # every example in the batch carries an "audio_mix" path; otherwise we
+        # fall back to the single-stream path for this batch.
+        have_mix = all(x.get("audio_mix") for x in features)
+        audios_mix = (
+            [read_audio(x["audio_mix"], self.sampling_rate) for x in features]
+            if have_mix else None
+        )
 
         prefixes = [
             self.processor.apply_chat_template(
@@ -71,6 +84,22 @@ class Qwen3ASRCollator:
             labels[labels == pad_id] = -100
 
         batch["labels"] = labels
+
+        if audios_mix is not None:
+            # Feature-extract the mixture stream through the *same* processor so
+            # the mel features are formatted identically to the separated stream.
+            # Only the audio features are kept; the mixture's text ids/mask are
+            # discarded (the LLM never sees the mixture as a separate span).
+            mix_batch = self.processor(
+                text=prefixes,
+                audio=audios_mix,
+                return_tensors="pt",
+                padding=True,
+                truncation=False,
+            )
+            batch["mix_input_features"] = mix_batch["input_features"]
+            batch["mix_feature_attention_mask"] = mix_batch["feature_attention_mask"]
+
         return batch
 
 

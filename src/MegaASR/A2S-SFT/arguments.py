@@ -13,7 +13,13 @@ def parse_args():
 
     # data
     p.add_argument("--sr", type=int, default=16000)
-    p.add_argument("--padding_side", type=str, default="auto",
+    # "right" (the tokenizer's own saved default, and what "auto" resolves to
+    # for this checkpoint) silently corrupts the forward pass for any batch
+    # with variable-length sequences: solo vs batched logits diverge
+    # completely (0% argmax match, loss ~13 vs ~1.4), almost certainly because
+    # the model's 3D-RoPE position-id computation assumes left-padded (or
+    # unpadded) input. Default to "left", which was verified to fix it.
+    p.add_argument("--padding_side", type=str, default="left",
                    choices=["auto", "left", "right"])
 
     # training
@@ -42,6 +48,25 @@ def parse_args():
     p.add_argument("--save_total_limit", type=int, default=5)
     p.add_argument("--resume", type=int, default=0)
     p.add_argument("--resume_from", type=str, default="")
+
+    # fusion (mixture-conditioned) — see PLAN.md
+    p.add_argument("--use_fusion", type=int, default=0,
+                   help="Fuse the pre-separation mixture stream into the audio "
+                        "tower. Requires 'audio_mix' in the dataset. "
+                        "0 => single-stream baseline (upstream model).")
+    p.add_argument("--fusion_type", type=str, default="late_gate",
+                   choices=["late_gate", "early_conv"],
+                   help="late_gate: gated residual on the tower OUTPUT (2 tower "
+                        "passes). early_conv: parallel conv on the mixture mel "
+                        "INPUT (1 tower pass). Ignored if --use_fusion 0.")
+
+    # full-parameter fine-tuning (only used when --use_lora 0)
+    p.add_argument("--freeze_llm", type=int, default=0,
+                   help="When --use_lora 0: freeze the LLM decoder + lm_head "
+                        "('model.*'/'lm_head.*') and fully fine-tune everything "
+                        "else (audio_tower -- encoder, aligner, and fusion params "
+                        "if --use_fusion 1). Ignored when --use_lora 1; use "
+                        "--lora_scope llm/encoder/etc. instead.")
 
     # lora
     p.add_argument("--use_lora", type=int, default=1)
