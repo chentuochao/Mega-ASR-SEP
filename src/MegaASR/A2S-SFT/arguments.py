@@ -13,12 +13,24 @@ def parse_args():
 
     # data
     p.add_argument("--sr", type=int, default=16000)
-    # "right" (the tokenizer's own saved default, and what "auto" resolves to
-    # for this checkpoint) silently corrupts the forward pass for any batch
-    # with variable-length sequences: solo vs batched logits diverge
-    # completely (0% argmax match, loss ~13 vs ~1.4), almost certainly because
-    # the model's 3D-RoPE position-id computation assumes left-padded (or
-    # unpadded) input. Default to "left", which was verified to fix it.
+    p.add_argument("--language", type=str, default="English",
+                   help="Forced language: appended to the training prefix as "
+                        "'language {LANGUAGE}<asr_text>' (see qwen_asr's own "
+                        "force_language convention), so the frozen LLM decoder "
+                        "skips language-ID and the label is a plain-text "
+                        "completion -- matching how you should evaluate/serve "
+                        "this checkpoint (force the same language at inference). "
+                        "Pass '' to disable and train/target plain text with no "
+                        "forcing tag at all (only sensible for a mixed-language "
+                        "dataset with no per-row language forcing).")
+    # Must be "left": qwen_asr's Qwen3ASRProcessorKwargs hardcodes
+    # padding_side="left" for the combined audio+text processor call
+    # unconditionally (see processing_qwen3_asr.py), so the collator's label
+    # masking (dataloader.py, which reads this attribute via
+    # processor.tokenizer.padding_side) must agree or it masks the wrong span
+    # for any batch with variable-length sequences -- verified this leaves the
+    # real prompt/audio-placeholder tokens unmasked and in the loss (batch
+    # loss ~13 vs ~1.4 for the same rows run individually).
     p.add_argument("--padding_side", type=str, default="left",
                    choices=["auto", "left", "right"])
 

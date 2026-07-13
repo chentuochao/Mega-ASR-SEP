@@ -56,7 +56,7 @@ def main():
     model = apply_lora(model, args)
 
     dataset = build_datasets(args.train_file, args.eval_file)
-    collator = Qwen3ASRCollator(processor=processor, sampling_rate=args.sr)
+    collator = Qwen3ASRCollator(processor=processor, sampling_rate=args.sr, language=args.language)
     training_args = build_training_args(args, use_bf16)
 
     trainer = MegaASRTrainer(

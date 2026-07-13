@@ -22,6 +22,11 @@ def audio_messages(prompt: str):
 class Qwen3ASRCollator:
     processor: Any
     sampling_rate: int = 16000
+    # Forced language tag, mirroring qwen_asr's transcribe(..., language=...):
+    # appended to the prefix (not the target) so the frozen LLM decoder sees
+    # the same "language X<asr_text>" forcing condition at train and eval
+    # time, and the target stays plain text. "" disables forcing (auto mode).
+    language: str = "English"
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         prompts = [x.get("prompt", "") for x in features]
@@ -41,12 +46,13 @@ class Qwen3ASRCollator:
             if have_mix else None
         )
 
+        lang_suffix = f"language {self.language}<asr_text>" if self.language else ""
         prefixes = [
             self.processor.apply_chat_template(
                 [audio_messages(p)],
                 add_generation_prompt=True,
                 tokenize=False,
-            )[0]
+            )[0] + lang_suffix
             for p in prompts
         ]
 
@@ -73,6 +79,11 @@ class Qwen3ASRCollator:
         full_lens = batch["attention_mask"].sum(dim=1)
 
         seq_len = labels.size(1)
+        # NOTE: qwen_asr's Qwen3ASRProcessorKwargs hardcodes padding_side="left"
+        # for the combined audio+text call unconditionally (see
+        # processing_qwen3_asr.py), so this must be "left" to match reality.
+        # --padding_side left (arguments.py's default) sets this attribute via
+        # finetune.py; keep the two in sync if either side ever changes.
         padding_side = getattr(self.processor.tokenizer, "padding_side", "right")
 
         for i, prefix_len in enumerate(prefix_lens):
