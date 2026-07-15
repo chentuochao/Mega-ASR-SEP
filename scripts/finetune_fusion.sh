@@ -13,8 +13,22 @@ set -euo pipefail
 #   early -> parallel conv on the mixture mel INPUT (1 tower pass).
 #   late/early both require EVERY dataset row to carry BOTH:
 #            {"audio_sep": "sep.wav", "audio_mix": "mix.wav", "text": "..."}
-#            (a batch with any row missing "audio_mix" silently falls back to
-#            single-stream for that batch — see dataloader.py's Qwen3ASRCollator)
+#            (dataloader.py's Qwen3ASRCollatorMix now hard-asserts on any row
+#            missing "audio_mix" -- it fails the batch loudly instead of
+#            silently falling back to single-stream)
+#
+# Data collator is picked automatically from FUSION_MODE via --collator auto
+# (see dataloader.py's COLLATORS/build_collator): none -> "none", late/early
+# -> "mix". Override with COLLATOR=<name> to use a different collator with a
+# fusion-enabled run, e.g. the white_noise_test diagnostic probe (both audio
+# streams synthesized from ONE clean "libritts_path" reference, corrupted
+# with disjoint extreme-white-noise chunks per stream, to test whether
+# fusion can combine two complementary streams in isolation from real
+# separation-quality issues):
+#   FUSION_MODE=late COLLATOR=white_noise_test ... bash scripts/finetune_fusion.sh
+# build_collator() rejects any FUSION_MODE/COLLATOR combo that mismatches
+# use_fusion (e.g. COLLATOR=white_noise_test with FUSION_MODE=none) at
+# startup, so a bad combination fails fast instead of silently misconfiguring.
 
 # # wandb
 # export WANDB_BASE_URL="https://api.wandb.ai"
@@ -24,6 +38,8 @@ set -euo pipefail
 # export WANDB_MODE=online
 
 FUSION_MODE="${FUSION_MODE:-none}"        # none | late | early
+COLLATOR="${COLLATOR:-auto}"              # auto | none | mix | white_noise_test
+                                           # (auto derives from FUSION_MODE; see header comment)
 MODEL_PATH="${MODEL_PATH:-Qwen3-ASR-1.7B}" # absolute path recommended -- the bare
                                             # default is relative and only resolves
                                             # if CWD happens to contain it
@@ -66,7 +82,7 @@ case "$FUSION_MODE" in
     exit 1
     ;;
 esac
-echo "[finetune_fusion] FUSION_MODE=${FUSION_MODE} -> ${FUSION_ARGS[*]}"
+echo "[finetune_fusion] FUSION_MODE=${FUSION_MODE} -> ${FUSION_ARGS[*]}  COLLATOR=${COLLATOR}"
 
 torchrun --nproc_per_node="${NPROC_PER_NODE}" A2S-SFT/finetune.py \
   --model_path "${MODEL_PATH}" \
@@ -74,6 +90,7 @@ torchrun --nproc_per_node="${NPROC_PER_NODE}" A2S-SFT/finetune.py \
   --eval_file "${VAL_JSONL}" \
   --output_dir "${OUT_DIR}" \
   "${FUSION_ARGS[@]}" \
+  --collator "${COLLATOR}" \
   --batch_size "${BATCH_SIZE}" \
   --grad_acc "${GRAD_ACC}" \
   --lr 1e-6 \

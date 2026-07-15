@@ -50,6 +50,34 @@ def patch_outer_forward(model):
     cls._forward_patched = True
 
 
+_FUSION_PARAM_NAME = {"late_gate": "fusion_gate", "early_conv": "conv2d1_mix"}
+
+
+def _check_fusion_type_matches_checkpoint(fusion_type, unexpected_keys):
+    """from_pretrained silently drops unexpected/mismatched keys (a warning at
+    most, never an error) -- so requesting the WRONG fusion_type for a
+    checkpoint actually trained with the other one "loads successfully" while
+    discarding that checkpoint's real trained fusion weights and substituting
+    a fresh, untrained (no-op) parameter in their place. The generic "newly
+    initialized" warning HF prints for the missing param looks identical to
+    what a brand-new training run prints, so this failure mode is otherwise
+    silent. Catch it here instead of silently evaluating the wrong thing."""
+    other_type = "early_conv" if fusion_type == "late_gate" else "late_gate"
+    other_param = _FUSION_PARAM_NAME[other_type]
+    hit = [k for k in unexpected_keys if other_param in k]
+    if hit:
+        this_param = _FUSION_PARAM_NAME[fusion_type]
+        raise ValueError(
+            f"fusion_type={fusion_type!r} was requested, but this checkpoint "
+            f"contains trained {other_param!r} weights ({hit}) and no "
+            f"{this_param!r} -- it was almost certainly trained with "
+            f"fusion_type={other_type!r} instead. Loading it as {fusion_type!r} "
+            f"would silently discard those trained weights and evaluate a "
+            f"fresh, untrained {this_param!r} (a true no-op) instead of this "
+            f"checkpoint's actual fusion behavior."
+        )
+
+
 def load_qwen3_asr(model_path: str, use_fusion: bool = False, fusion_type: str = "late_gate"):
     use_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8
     dtype = torch.bfloat16 if use_bf16 else torch.float16
@@ -68,13 +96,22 @@ def load_qwen3_asr(model_path: str, use_fusion: bool = False, fusion_type: str =
         config = Qwen3ASRConfig.from_pretrained(model_path)
         config.thinker_config.audio_config.use_fusion = True
         config.thinker_config.audio_config.fusion_type = fusion_type
-        model = Qwen3ASRForConditionalGenerationSep.from_pretrained(
+        model, loading_info = Qwen3ASRForConditionalGenerationSep.from_pretrained(
             model_path, config=config, dtype=dtype, device_map=None,
+            output_loading_info=True,
         )
-        # from_pretrained re-inits the (missing) fusion params via HF's default
-        # _init_weights (e.g. fusion_gate bias -> 0 => gate = 0.5). Restore the
-        # (near-)no-op init so training starts close to the single-stream baseline.
-        model.thinker.audio_tower.reset_fusion_params()
+        _check_fusion_type_matches_checkpoint(fusion_type, loading_info["unexpected_keys"])
+        # Only reset on a FIRST-TIME init from a pristine checkpoint that never
+        # had this fusion param (missing_keys) -- from_pretrained re-inits a
+        # missing param via HF's default _init_weights (e.g. fusion_gate bias
+        # -> 0 => gate = 0.5), so override that with the deliberate near-no-op
+        # init a fresh training run should start from. An ALREADY-TRAINED
+        # checkpoint loads its real fusion_gate/conv2d1_mix values here
+        # instead (not in missing_keys) -- resetting unconditionally would
+        # silently wipe those trained values back to init on every eval/reload.
+        fusion_param = _FUSION_PARAM_NAME[fusion_type]
+        if any(fusion_param in k for k in loading_info["missing_keys"]):
+            model.thinker.audio_tower.reset_fusion_params()
         processor = AutoProcessor.from_pretrained(model_path, fix_mistral_regex=True)
     else:
         wrapper = Qwen3ASRModel.from_pretrained(
@@ -83,6 +120,18 @@ def load_qwen3_asr(model_path: str, use_fusion: bool = False, fusion_type: str =
         model, processor = wrapper.model, wrapper.processor
 
     patch_outer_forward(model)
+    # HF's Trainer decides whether a model normalizes loss across gradient-
+    # accumulation micro-batches (via num_items_in_batch) by checking for a
+    # bare **kwargs in forward() -- not whether num_items_in_batch is actually
+    # used. patch_outer_forward's wrapper (and the thinker's forward) both end
+    # in **kwargs, so Trainer wrongly concludes this model self-normalizes and
+    # skips its own `loss / gradient_accumulation_steps` division, while the
+    # model silently drops num_items_in_batch without ever using it. Net
+    # effect: the loss actually backpropagated (and logged) is
+    # gradient_accumulation_steps times too large. Per Trainer.compute_loss's
+    # own docstring, force the safe fallback explicitly rather than relying on
+    # the **kwargs heuristic.
+    model.accepts_loss_kwargs = False
     model.generation_config = GenerationConfig.from_model_config(model.config)
     return model, processor, use_bf16
 

@@ -72,6 +72,25 @@ def parse_args():
                         "passes). early_conv: parallel conv on the mixture mel "
                         "INPUT (1 tower pass). Ignored if --use_fusion 0.")
 
+    # collator selection (see dataloader.py's COLLATORS registry)
+    p.add_argument("--collator", type=str, default="auto",
+                   choices=["auto", "none", "mix", "white_noise_test"],
+                   help="Which data collator to use. 'auto' (default) picks "
+                        "'mix' if --use_fusion else 'none' -- the normal "
+                        "training path. 'white_noise_test' is a diagnostic "
+                        "probe: both streams start as the SAME clean "
+                        "'libritts_path' reference audio, then get corrupted "
+                        "with disjoint extreme-white-noise chunks per stream "
+                        "(never both at once), to test whether fusion can "
+                        "actually combine two complementary streams in "
+                        "isolation from real separation-quality issues. "
+                        "Requires --use_fusion 1 to exercise the fusion-"
+                        "capable model.")
+    p.add_argument("--wn_seed", type=int, default=0,
+                   help="[white_noise_test only] base seed, combined with a "
+                        "stable per-path hash so the same corruption pattern "
+                        "reproduces across runs.")
+
     # full-parameter fine-tuning (only used when --use_lora 0)
     p.add_argument("--freeze_llm", type=int, default=0,
                    help="When --use_lora 0: freeze the LLM decoder + lm_head "

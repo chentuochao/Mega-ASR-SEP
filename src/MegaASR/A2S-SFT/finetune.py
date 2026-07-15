@@ -1,11 +1,23 @@
 # coding=utf-8
+import json
+import os
+
 from transformers import TrainingArguments
 
 from arguments import parse_args
 from checkpointing import MakeCheckpointInferableCallback, find_latest_checkpoint
-from dataloader import Qwen3ASRCollator, build_datasets
+from dataloader import build_collator, build_datasets
 from modeling import apply_lora, load_qwen3_asr
 from trainer import MegaASRTrainer
+
+# Written once to output_dir/RUN_CONFIG_FILENAME at the start of training --
+# use_fusion/fusion_type/collator/wn_seed aren't recoverable from a saved
+# checkpoint's config.json (collator especially: it's a data-loading choice,
+# not a model-architecture field, so there's nowhere else for it to live).
+# tests/eval_checkpoint.py looks for this file next to a --checkpoint_dir
+# (checkpoints are always direct children of output_dir) to auto-fill those
+# flags instead of requiring them to be re-typed and kept in sync by hand.
+RUN_CONFIG_FILENAME = "run_config.json"
 
 
 def build_training_args(args, use_bf16: bool):
@@ -56,8 +68,30 @@ def main():
     model = apply_lora(model, args)
 
     dataset = build_datasets(args.train_file, args.eval_file)
-    collator = Qwen3ASRCollator(processor=processor, sampling_rate=args.sr, language=args.language)
+    collator_name = args.collator if args.collator != "auto" else ("mix" if args.use_fusion else "none")
+    collator = build_collator(
+        collator_name,
+        use_fusion=bool(args.use_fusion),
+        processor=processor,
+        sampling_rate=args.sr,
+        language=args.language,
+        seed=args.wn_seed,
+    )
     training_args = build_training_args(args, use_bf16)
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    run_config = {
+        "use_fusion": bool(args.use_fusion),
+        "fusion_type": args.fusion_type,
+        "collator": collator_name,
+        "wn_seed": args.wn_seed,
+        "language": args.language,
+        "sr": args.sr,
+    }
+    run_config_path = os.path.join(args.output_dir, RUN_CONFIG_FILENAME)
+    with open(run_config_path, "w") as f:
+        json.dump(run_config, f, indent=2)
+    print(f"[run_config] wrote {run_config_path}: {run_config}")
 
     trainer = MegaASRTrainer(
         model=model,
