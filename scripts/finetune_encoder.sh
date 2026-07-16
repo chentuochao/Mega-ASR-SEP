@@ -74,7 +74,7 @@ LANGUAGE="${LANGUAGE:-English}"           # forced language tag baked into the t
 # finetune_encoder.sh) -- RUN_NAME folds in FUSION_MODE by default so
 # none/late/early runs never collide in the same OUT_DIR, and defaults to a
 # different prefix than finetune_fusion.sh's LoRA runs so the two don't clash.
-RUN_NAME="cleanmask"
+RUN_NAME="cleanfix"
 MODEL_PATH="/home/ubuntu/Hearvana/Scripts/Mega-ASR/ckpt/Mega-ASR/Qwen3-ASR-1.7B"
 RUN_DIR="/home/ubuntu/Hearvana/datasets/Results_ASR"
 DATA_BASE="/home/ubuntu/Hearvana/datasets/Mix_Qwen_ASR_dataset"
