@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 import librosa
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import DatasetDict, concatenate_datasets, interleave_datasets, load_dataset
 
 
 def read_audio(path: str, sr: int = 16000):
@@ -403,8 +403,56 @@ def build_collator(name: str, use_fusion: bool, **kwargs) -> Any:
     return cls(**{k: v for k, v in kwargs.items() if k in valid})
 
 
+def _parse_data_spec(spec: str) -> List[Any]:
+    """"path" or "path:weight,path2:weight2,..." -> [(path, weight), ...].
+    Bare path (no ':') defaults to weight 1.0, so single-file specs are
+    unaffected."""
+    entries = []
+    for item in spec.split(","):
+        item = item.strip()
+        if ":" in item:
+            path, _, weight_str = item.rpartition(":")
+            weight = float(weight_str)
+        else:
+            path, weight = item, 1.0
+        if weight <= 0:
+            raise ValueError(f"weight for {path!r} must be > 0, got {weight}")
+        entries.append((path, weight))
+    return entries
+
+
+def _load_weighted(spec: str):
+    """Single file -> that dataset as-is. Multiple -> probability-weighted
+    interleave (stopping_strategy=all_exhausted: oversamples low-weight files
+    so every file is fully seen at least once per epoch at the target
+    proportions, instead of truncating the epoch at whichever file runs out
+    first)."""
+    entries = _parse_data_spec(spec)
+    if len(entries) == 1:
+        path, _ = entries[0]
+        return load_dataset("json", data_files=path)["train"]
+    datasets_list = [load_dataset("json", data_files=path)["train"] for path, _ in entries]
+    total = sum(w for _, w in entries)
+    probabilities = [w / total for _, w in entries]
+    return interleave_datasets(
+        datasets_list, probabilities=probabilities, seed=42,
+        stopping_strategy="all_exhausted",
+    )
+
+
+def _load_concatenated(spec: str):
+    """Ignores weights -- every listed file contributes all its rows, so eval
+    always covers 100% of every validation file, deterministically."""
+    entries = _parse_data_spec(spec)
+    if len(entries) == 1:
+        path, _ = entries[0]
+        return load_dataset("json", data_files=path)["train"]
+    datasets_list = [load_dataset("json", data_files=path)["train"] for path, _ in entries]
+    return concatenate_datasets(datasets_list)
+
+
 def build_datasets(train_file: str, eval_file: str = ""):
-    files = {"train": train_file}
+    splits = {"train": _load_weighted(train_file)}
     if eval_file:
-        files["validation"] = eval_file
-    return load_dataset("json", data_files=files)
+        splits["validation"] = _load_concatenated(eval_file)
+    return DatasetDict(splits)

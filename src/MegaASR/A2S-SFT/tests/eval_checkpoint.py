@@ -37,6 +37,22 @@ BOTH streams synthesized from row["libritts_path"] via the identical
 disjoint-noise-masking code, not read from audio_sep/audio_mix. Requires
 --use_fusion 1 (the checkpoint must actually consume mix_input_features):
     ... --use_fusion 1 --fusion_type late_gate --collator white_noise_test --wn_seed 0
+
+For a checkpoint where any modeling.py's apply_train_mode region (encoder/
+fusion/aligner/llm) was ft_mode: lora (see arguments.py's --ft_params) --
+equally, any checkpoint from the older --use_lora 1 path (finetune_fusion.sh)
+-- the checkpoint directory is a PEFT ADAPTER (adapter_model.safetensors +
+adapter_config.json), not a full model: trainer.py's save_model deletes any
+full-model weight file from an adapter checkpoint's directory. Loading it
+needs the ORIGINAL base checkpoint the adapter was trained from, applied via
+PeftModel.from_pretrained -- see _load_model_for_eval below.
+--base_model_path is auto-filled from run_config.json's "model_path" (which
+finetune.py writes for every run, adapter or not) if left unset; pass it
+explicitly only for a checkpoint saved before that field existed there (it's
+also in that checkpoint's base_model.txt, written by trainer.py, as a
+plain-text fallback for exactly this case). A plain full-FT checkpoint
+(nothing was ft_mode: lora) needs none of this -- it's a full model, loaded
+exactly as before.
 """
 import argparse
 import json
@@ -47,11 +63,20 @@ import sys
 
 import jiwer
 import torch
+from peft import PeftModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import modeling  # noqa: E402
 from dataloader import Qwen3ASRCollator_WhiteNoise_Test, read_audio  # noqa: E402
 from modeling import load_qwen3_asr  # noqa: E402
+
+# PEFT's two possible adapter-weights filenames (safetensors preferred, .bin
+# fallback for an older/non-safetensors save) -- their presence in
+# --checkpoint_dir is how we tell an adapter checkpoint apart from a full
+# model, since trainer.py's save_model deletes any full-model weight file
+# from an adapter checkpoint's directory (and vice versa).
+_ADAPTER_WEIGHT_FILES = ("adapter_model.safetensors", "adapter_model.bin")
 
 try:
     from num2words import num2words as _num2words
@@ -133,6 +158,53 @@ def _load_run_config(checkpoint_dir):
     return None, candidate
 
 
+def _is_adapter_checkpoint(checkpoint_dir):
+    return any(os.path.exists(os.path.join(checkpoint_dir, name)) for name in _ADAPTER_WEIGHT_FILES)
+
+
+def _read_base_model_txt(checkpoint_dir):
+    """Plain-text fallback for a checkpoint saved before run_config.json
+    carried "model_path" -- trainer.py's save_model writes this file for
+    EVERY checkpoint (full-FT or adapter alike), unconditionally."""
+    candidate = os.path.join(checkpoint_dir, "base_model.txt")
+    if os.path.exists(candidate):
+        with open(candidate) as f:
+            return f.read().strip()
+    return None
+
+
+def _load_model_for_eval(checkpoint_dir, use_fusion, fusion_type, base_model_path):
+    """Load a checkpoint for eval, transparently handling both a full model
+    (this codebase's original, and still the common, case) and a PEFT
+    adapter checkpoint (any modeling.py apply_train_mode region was
+    ft_mode: lora, or an older --use_lora 1 finetune_fusion.sh run).
+
+    A full checkpoint IS the model -- load_qwen3_asr(checkpoint_dir, ...)
+    works exactly as it always has. An adapter checkpoint is NOT a model on
+    its own (trainer.py's save_model deletes any full-model weight file from
+    an adapter checkpoint's directory): it has to be applied on top of the
+    ORIGINAL base checkpoint it was trained from, via PeftModel.from_pretrained
+    -- same mechanism tests/test_fusion_save_load.py's LoRA round-trip test
+    already verified reloads modules_to_save/lora_A/lora_B values correctly.
+
+    Returns (model, processor, use_bf16), same shape as load_qwen3_asr."""
+    if not _is_adapter_checkpoint(checkpoint_dir):
+        return load_qwen3_asr(checkpoint_dir, use_fusion=use_fusion, fusion_type=fusion_type)
+
+    if not base_model_path:
+        raise ValueError(
+            f"{checkpoint_dir} is a PEFT adapter checkpoint ({_ADAPTER_WEIGHT_FILES}), which has no "
+            f"full model weights of its own -- couldn't find a base model path in run_config.json's "
+            f"'model_path' or {os.path.join(checkpoint_dir, 'base_model.txt')} either. Pass "
+            f"--base_model_path explicitly (the checkpoint this adapter was trained from)."
+        )
+    print(f"[load] {checkpoint_dir} is a PEFT adapter checkpoint -- loading base "
+          f"model from {base_model_path} and applying the adapter on top")
+    model, processor, use_bf16 = load_qwen3_asr(base_model_path, use_fusion=use_fusion, fusion_type=fusion_type)
+    model.thinker = PeftModel.from_pretrained(model.thinker, checkpoint_dir, is_trainable=False)
+    return model, processor, use_bf16
+
+
 def describe_model(model, use_fusion: bool, fusion_type: str, device: str) -> str:
     """Summarize exactly what architecture got loaded, so you can confirm at a
     glance that eval is exercising what you think it is -- which model class,
@@ -152,11 +224,19 @@ def describe_model(model, use_fusion: bool, fusion_type: str, device: str) -> st
     else:
         lines.append(f"  audio_tower.fusion_type (as actually constructed) = {tower.fusion_type!r}")
         if hasattr(tower, "fusion_gate"):
-            bias_mean = tower.fusion_gate.bias.detach().float().mean().item()
-            near_init = abs(bias_mean - (-5.0)) < 0.5
+            # weight AND bias are both zero-initialized (the near-zero-at-init
+            # gate behavior comes from GATE_INIT_SHIFT, a fixed constant added
+            # at forward time, not a stored/trained parameter -- see
+            # Qwen3ASRAudioEncoderLateGate's docstring for why: a trainable
+            # bias sitting at a large magnitude like -5.0 is invisible to bf16
+            # optimizer updates). So "moved from init" here means either
+            # tensor is no longer ~0, not a comparison to -5.0.
+            w_absmax = tower.fusion_gate.weight.detach().float().abs().max().item()
+            b_absmax = tower.fusion_gate.bias.detach().float().abs().max().item()
+            near_init = w_absmax < 1e-4 and b_absmax < 1e-4
             lines.append(
-                f"  fusion_gate present: bias.mean()={bias_mean:.3f} "
-                f"({'looks UNTRAINED / still ~no-op init (-5.0)' if near_init else 'has moved from init -- trained'})"
+                f"  fusion_gate present: weight.abs().max()={w_absmax:.5f} bias.abs().max()={b_absmax:.5f} "
+                f"({'looks UNTRAINED / still ~no-op init (0.0)' if near_init else 'has moved from init -- trained'})"
             )
         if hasattr(tower, "conv2d1_mix"):
             w_absmax = tower.conv2d1_mix.weight.detach().float().abs().max().item()
@@ -165,6 +245,59 @@ def describe_model(model, use_fusion: bool, fusion_type: str, device: str) -> st
                 f"  conv2d1_mix present: weight.abs().max()={w_absmax:.5f} "
                 f"({'looks UNTRAINED / still ~no-op init (0.0)' if near_init else 'has moved from init -- trained'})"
             )
+        if hasattr(tower, "film_proj"):
+            w_absmax = tower.film_proj.weight.detach().float().abs().max().item()
+            near_init = w_absmax < 1e-4
+            lines.append(
+                f"  fddt film_proj present: weight.abs().max()={w_absmax:.5f} "
+                f"({'looks UNTRAINED / still ~no-op init (0.0)' if near_init else 'has moved from init -- trained'})"
+            )
+        if hasattr(tower, "cross_attn"):
+            w_absmax = tower.cross_attn.out_proj.weight.detach().float().abs().max().item()
+            near_init = w_absmax < 1e-4
+            lines.append(
+                f"  cross_attn out_proj present: weight.abs().max()={w_absmax:.5f} "
+                f"({'looks UNTRAINED / still ~no-op init (0.0)' if near_init else 'has moved from init -- trained'})"
+            )
+
+    if hasattr(model.thinker, "peft_config"):
+        # PEFT-wrapped (any modeling.py apply_train_mode region was ft_mode:
+        # lora) -- the per-attribute checks above assume a plain nn.Linear/
+        # nn.Conv2d at those attributes, which no longer holds once PEFT
+        # wraps a region's modules (lora_A/lora_B added alongside a frozen
+        # base, or a modules_to_save wrapper substituted in). This summary
+        # is authoritative regardless of wrapping: it classifies every
+        # parameter the SAME way apply_train_mode/trainer.py's optimizer do
+        # (modeling.classify_param_region).
+        #
+        # Deliberately NOT based on param.requires_grad here: _load_model_for_eval
+        # loads with PeftModel.from_pretrained(..., is_trainable=False), which
+        # sets requires_grad=False on EVERY parameter (correct for inference) --
+        # checking requires_grad post-load would show all-zero regardless of
+        # what was actually trained. lora_A/lora_B and modules_to_save are
+        # structural (present or not, independent of requires_grad), so those
+        # are what's counted instead.
+        fusion_names = modeling._FUSION_MODULE_NAMES.get(fusion_type, []) if use_fusion else []
+        lora_counts = {r: 0 for r in modeling.REGIONS}
+        full_counts = {r: 0 for r in modeling.REGIONS}
+        for name, _ in model.thinker.named_parameters():
+            region = modeling.classify_param_region(name, fusion_names)
+            if region not in modeling.REGIONS:
+                continue
+            if "lora_A" in name or "lora_B" in name:
+                lora_counts[region] += 1
+            if "modules_to_save" in name:
+                full_counts[region] += 1
+        lines.append("  PEFT adapter active (region activity shown structurally, not via "
+                      "requires_grad -- eval loads with is_trainable=False):")
+        lines.append(
+            "    LoRA (lora_A/lora_B) tensor counts by region: "
+            + ", ".join(f"{r}={lora_counts[r]}" for r in modeling.REGIONS)
+        )
+        lines.append(
+            "    Full-FT-under-PEFT (modules_to_save) tensor counts by region: "
+            + ", ".join(f"{r}={full_counts[r]}" for r in modeling.REGIONS)
+        )
 
     total = sum(p.numel() for p in model.parameters())
     first_param = next(model.parameters())
@@ -188,8 +321,18 @@ def main():
     ap.add_argument("--use_fusion", type=int, default=None,
                     help="1 to enable fusion generation. Auto-filled from "
                          "run_config.json next to --checkpoint_dir if left unset.")
-    ap.add_argument("--fusion_type", default=None, choices=["late_gate", "early_conv"],
+    ap.add_argument("--fusion_type", default=None,
+                    choices=["late_gate", "early_conv", "fddt", "cross_attn"],
                     help="Auto-filled from run_config.json if left unset.")
+    ap.add_argument("--base_model_path", default=None,
+                    help="Only needed if --checkpoint_dir is a PEFT adapter "
+                         "checkpoint (any ft_params region was ft_mode: lora, "
+                         "or an older --use_lora 1 finetune_fusion.sh run) -- "
+                         "the base checkpoint the adapter was trained from. "
+                         "Auto-filled from run_config.json's 'model_path' "
+                         "(or that checkpoint's base_model.txt, for one saved "
+                         "before that field existed) if left unset. Ignored "
+                         "for a plain full-model checkpoint.")
     ap.add_argument("--max_new_tokens", type=int, default=256)
     ap.add_argument("--language", default=None,
                     help="force this language (e.g. English) so the model skips "
@@ -244,6 +387,11 @@ def main():
         args.wn_seed = run_config.get("wn_seed", 0) if run_config else 0
     if args.language is None:
         args.language = run_config.get("language", "English") if run_config else "English"
+    if args.base_model_path is None:
+        args.base_model_path = (
+            (run_config.get("model_path") if run_config else None)
+            or _read_base_model_txt(args.checkpoint_dir)
+        )
 
     if args.collator == "white_noise_test" and not args.use_fusion:
         raise ValueError(
@@ -253,8 +401,8 @@ def main():
         )
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    model, processor, _ = load_qwen3_asr(
-        args.checkpoint_dir, use_fusion=bool(args.use_fusion), fusion_type=args.fusion_type
+    model, processor, _ = _load_model_for_eval(
+        args.checkpoint_dir, bool(args.use_fusion), args.fusion_type, args.base_model_path
     )
     model.to(device).eval()
     print(describe_model(model, bool(args.use_fusion), args.fusion_type, device))

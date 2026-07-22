@@ -101,6 +101,8 @@ class Qwen3ASRAudioEncoderConfig(PretrainedConfig):
         downsample_hidden_size=480,
         use_fusion=False,
         fusion_type="late_gate",
+        cross_attn_heads=8,
+        cross_attn_window=50,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -125,10 +127,19 @@ class Qwen3ASRAudioEncoderConfig(PretrainedConfig):
         self.downsample_hidden_size = downsample_hidden_size
         # Mixture-conditioned fusion (Mega-ASR-SEP). Off by default so the vendored
         # config is behaviourally identical to the upstream single-stream model.
-        # fusion_type: "late_gate" (gated residual on tower output, 2 tower passes)
-        #           or "early_conv" (parallel conv on mixture mel, 1 tower pass).
+        # fusion_type: "late_gate" (gated residual on tower output, 2 tower passes),
+        #           "early_conv" (parallel conv on mixture mel, 1 tower pass),
+        #           "fddt" (per-layer FiLM conditioning, mix primary / sep
+        #                   condition, 1 tower pass + cheap conv-only side pass),
+        #        or "cross_attn" (local windowed cross-attention on tower
+        #                         output, 2 tower passes).
+        # See models/modeling_qwen3_asr_sep.py for the exact fusion math of each.
         self.use_fusion = use_fusion
         self.fusion_type = fusion_type
+        # cross_attn only: attention heads / local-window radius (in post-
+        # downsampling tokens) for the sep<->mix cross-attention block.
+        self.cross_attn_heads = cross_attn_heads
+        self.cross_attn_window = cross_attn_window
 
 
 class Qwen3ASRTextConfig(PretrainedConfig):

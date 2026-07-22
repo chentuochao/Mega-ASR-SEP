@@ -1,0 +1,13 @@
+run_name: SElibri_singlside_early
+fusion_mode: early
+collator: auto
+train_jsonl: "/home/ubuntu/Hearvana/datasets/Mix_Qwen_ASR_dataset/train_clean.jsonl:0.8,/home/ubuntu/Hearvana/datasets/SelfSpeech_Qwen_ASR_dataset/train.jsonl:0.2"
+val_jsonl: "/home/ubuntu/Hearvana/datasets/SelfSpeech_Qwen_ASR_dataset/val.jsonl"
+batch_size: 8
+grad_acc: 8
+epochs: 3
+save_steps: 200
+lr_encoder: 1e-5
+lr_aligner: 1e-5
+language: English
+report_to: none

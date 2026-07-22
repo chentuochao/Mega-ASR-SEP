@@ -1,4 +1,6 @@
 # coding=utf-8
+import json
+
 import torch
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import GenerationConfig
@@ -50,32 +52,44 @@ def patch_outer_forward(model):
     cls._forward_patched = True
 
 
-_FUSION_PARAM_NAME = {"late_gate": "fusion_gate", "early_conv": "conv2d1_mix"}
+# Top-level attribute name(s) each fusion type adds to the audio tower (see
+# models/modeling_qwen3_asr_sep.py's FUSION_ENCODER_CLASSES) -- used both to
+# detect a fusion_type/checkpoint mismatch and to tell PEFT which modules to
+# keep trainable (`modules_to_save`). Keep in sync when adding a new fusion
+# type there.
+_FUSION_MODULE_NAMES = {
+    "late_gate": ["fusion_gate"],
+    "early_conv": ["conv2d1_mix"],
+    "fddt": ["cond_proj", "film_proj", "layer_gates"],
+    "cross_attn": ["cross_attn"],
+}
 
 
 def _check_fusion_type_matches_checkpoint(fusion_type, unexpected_keys):
     """from_pretrained silently drops unexpected/mismatched keys (a warning at
     most, never an error) -- so requesting the WRONG fusion_type for a
-    checkpoint actually trained with the other one "loads successfully" while
-    discarding that checkpoint's real trained fusion weights and substituting
-    a fresh, untrained (no-op) parameter in their place. The generic "newly
-    initialized" warning HF prints for the missing param looks identical to
-    what a brand-new training run prints, so this failure mode is otherwise
-    silent. Catch it here instead of silently evaluating the wrong thing."""
-    other_type = "early_conv" if fusion_type == "late_gate" else "late_gate"
-    other_param = _FUSION_PARAM_NAME[other_type]
-    hit = [k for k in unexpected_keys if other_param in k]
-    if hit:
-        this_param = _FUSION_PARAM_NAME[fusion_type]
-        raise ValueError(
-            f"fusion_type={fusion_type!r} was requested, but this checkpoint "
-            f"contains trained {other_param!r} weights ({hit}) and no "
-            f"{this_param!r} -- it was almost certainly trained with "
-            f"fusion_type={other_type!r} instead. Loading it as {fusion_type!r} "
-            f"would silently discard those trained weights and evaluate a "
-            f"fresh, untrained {this_param!r} (a true no-op) instead of this "
-            f"checkpoint's actual fusion behavior."
-        )
+    checkpoint actually trained with a different one "loads successfully"
+    while discarding that checkpoint's real trained fusion weights and
+    substituting a fresh, untrained (no-op) parameter in their place. The
+    generic "newly initialized" warning HF prints for the missing param looks
+    identical to what a brand-new training run prints, so this failure mode
+    is otherwise silent. Catch it here instead of silently evaluating the
+    wrong thing."""
+    for other_type, other_names in _FUSION_MODULE_NAMES.items():
+        if other_type == fusion_type:
+            continue
+        hit = [k for k in unexpected_keys if any(name in k for name in other_names)]
+        if hit:
+            this_names = _FUSION_MODULE_NAMES[fusion_type]
+            raise ValueError(
+                f"fusion_type={fusion_type!r} was requested, but this checkpoint "
+                f"contains trained {other_type!r} weights ({hit}) and none of "
+                f"{this_names} -- it was almost certainly trained with "
+                f"fusion_type={other_type!r} instead. Loading it as {fusion_type!r} "
+                f"would silently discard those trained weights and evaluate a "
+                f"fresh, untrained set of {fusion_type!r} params (a true no-op) "
+                f"instead of this checkpoint's actual fusion behavior."
+            )
 
 
 def load_qwen3_asr(model_path: str, use_fusion: bool = False, fusion_type: str = "late_gate"):
@@ -109,8 +123,8 @@ def load_qwen3_asr(model_path: str, use_fusion: bool = False, fusion_type: str =
         # checkpoint loads its real fusion_gate/conv2d1_mix values here
         # instead (not in missing_keys) -- resetting unconditionally would
         # silently wipe those trained values back to init on every eval/reload.
-        fusion_param = _FUSION_PARAM_NAME[fusion_type]
-        if any(fusion_param in k for k in loading_info["missing_keys"]):
+        fusion_names = _FUSION_MODULE_NAMES[fusion_type]
+        if any(name in k for k in loading_info["missing_keys"] for name in fusion_names):
             model.thinker.audio_tower.reset_fusion_params()
         processor = AutoProcessor.from_pretrained(model_path, fix_mistral_regex=True)
     else:
@@ -168,7 +182,7 @@ def apply_lora(model, args):
     # be silently dropped by the adapter-only save path).
     if getattr(args, "use_fusion", False):
         fusion_type = getattr(args, "fusion_type", "late_gate")
-        modules_to_save = ["fusion_gate"] if fusion_type == "late_gate" else ["conv2d1_mix"]
+        modules_to_save = list(_FUSION_MODULE_NAMES[fusion_type])
     else:
         modules_to_save = None
 
@@ -183,4 +197,205 @@ def apply_lora(model, args):
     )
     model.thinker = get_peft_model(model.thinker, lora_config)
     model.thinker.print_trainable_parameters()
+    return model
+
+
+# --- Per-region training mode (encoder / fusion / aligner / llm), each ------
+# independently freeze / lora / full -- see arguments.py's --ft_params and
+# scripts/configs/example_ft_params.yaml. This supersedes apply_lora() above
+# (kept as-is for any recipe that still passes the older --use_lora/
+# --freeze_llm/--lora_scope flags instead of --ft_params) with a strictly
+# more expressive mechanism: apply_lora can only LoRA-adapt-or-freeze "the
+# rest of the model" as one unit plus always-full-FT the fusion params,
+# whereas apply_train_mode lets every region pick its own mode independently
+# (e.g. encoder=lora, fusion=full, aligner=full, llm=freeze in one run).
+REGIONS = ("encoder", "fusion", "aligner", "llm")
+_VALID_FT_MODES = ("freeze", "lora", "full")
+
+# LoRA target_modules regex per region -- identical to LORA_TARGETS above,
+# just split so apply_train_mode can union an arbitrary subset of them.
+_REGION_LORA_TARGET_PATTERNS = {
+    "encoder": LORA_TARGETS["encoder"],
+    "aligner": LORA_TARGETS["aligner"],
+    "llm": LORA_TARGETS["llm"],
+}
+
+
+def classify_param_region(name: str, fusion_module_names=()) -> str:
+    """Classify a thinker-level parameter name into one of the four
+    trainable regions (encoder/fusion/aligner/llm), or "other" for anything
+    unrecognized. fusion and aligner are checked before the generic
+    "audio_tower." catch-all so their params (which also live under
+    audio_tower) aren't misclassified as encoder. Every check is a plain
+    substring test (never startswith/anchored), so this works unchanged on
+    a bare thinker's param names, on the top-level wrapper's "thinker."-
+    prefixed names, and on PEFT-wrapped names (".../lora_A.default...",
+    ".../modules_to_save.default...", "base_model.model...." prefix) alike --
+    whatever wrapping is added, the substrings this checks for are still in
+    there somewhere. Shared by apply_train_mode (this module, for freeze/
+    lora/full decisions) and MegaASRTrainer's optimizer param-group builder
+    (trainer.py) for per-region learning rates, so the two can never
+    classify the same parameter into different regions."""
+    if any(sig in name for sig in fusion_module_names):
+        return "fusion"
+    if any(f"audio_tower.{sig}" in name for sig in ("conv_out", "proj1", "proj2")):
+        return "aligner"
+    if "audio_tower." in name:
+        return "encoder"
+    if "model." in name or "lm_head." in name:
+        return "llm"
+    return "other"
+
+
+def parse_ft_params(raw: str) -> dict:
+    """Parse --ft_params's JSON string into {region: {"ft_mode": ..., "lr":
+    ..., ...}} and validate it. Raises ValueError with a specific message on
+    anything wrong rather than letting a malformed config silently train (or
+    silently NOT train) the wrong thing."""
+    try:
+        ft_params = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"--ft_params is not valid JSON: {e}\nGot: {raw!r}") from e
+
+    missing = [r for r in REGIONS if r not in ft_params]
+    if missing:
+        raise ValueError(f"--ft_params is missing region(s) {missing}; all of {REGIONS} must be specified")
+
+    for region in REGIONS:
+        region_cfg = ft_params[region]
+        mode = region_cfg.get("ft_mode")
+        if mode not in _VALID_FT_MODES:
+            raise ValueError(
+                f"--ft_params[{region!r}].ft_mode must be one of {_VALID_FT_MODES}, got {mode!r}"
+            )
+        if "lr" not in region_cfg:
+            raise ValueError(f"--ft_params[{region!r}] is missing 'lr'")
+        # Coerce numeric fields explicitly rather than trusting the JSON's
+        # own type: YAML's bare-exponent floats (e.g. "lr: 1e-5", no decimal
+        # point) don't match PyYAML's float regex and come through as the
+        # STRING "1e-5", not a float -- load_config.py JSON-serializes this
+        # nested block value-for-value (unlike the flat scalar keys, which
+        # get str()'d and re-typed by argparse), so that string would
+        # otherwise reach torch.optim.AdamW's param group as-is and break.
+        for key, caster in (("lr", float), ("lora_r", int), ("lora_alpha", int)):
+            if key in region_cfg:
+                try:
+                    region_cfg[key] = caster(region_cfg[key])
+                except (TypeError, ValueError) as e:
+                    raise ValueError(
+                        f"--ft_params[{region!r}][{key!r}] = {region_cfg[key]!r} is not a valid "
+                        f"{caster.__name__} (tip: YAML needs a decimal point for exponential "
+                        f"notation to parse as a number, e.g. 1.0e-5 not 1e-5)"
+                    ) from e
+
+    if ft_params["fusion"]["ft_mode"] == "lora":
+        raise ValueError(
+            "--ft_params['fusion'].ft_mode='lora' doesn't make sense: fusion params "
+            "(fusion_gate/conv2d1_mix/cond_proj+film_proj+layer_gates/cross_attn, "
+            "depending on fusion_type) have no pretrained base weight to low-rank-"
+            "adapt -- they're created fresh, untrained, at init. Use 'freeze' or 'full'."
+        )
+    return ft_params
+
+
+def _region_full_ft_module_names(region: str, audio_tower) -> list:
+    """Concrete nn.Module names for full-FT'ing `region` via PEFT's
+    modules_to_save -- only used when some OTHER region is set to 'lora' (so
+    the whole thinker gets PEFT-wrapped and plain requires_grad toggling
+    isn't available). Every entry here is a real nn.Module, never a bare
+    ModuleList/ModuleDict (which PEFT's modules_to_save explicitly refuses to
+    wrap -- see check_module in peft/utils/other.py, and _FDDTLayerGates in
+    modeling_qwen3_asr_sep.py for the same constraint hit and fixed there):
+    `audio_tower.layers` itself is a ModuleList, so encoder is targeted one
+    layer-module at a time rather than as a single entry; `thinker.model` is
+    a proper composite Module (its own internal `.layers` ModuleList is
+    irrelevant to PEFT, which only inspects the top-level wrapped attribute),
+    so llm can be targeted as one entry."""
+    if region == "encoder":
+        return [f"audio_tower.layers.{i}" for i in range(len(audio_tower.layers))] + [
+            "audio_tower.conv2d1", "audio_tower.conv2d2", "audio_tower.conv2d3", "audio_tower.ln_post",
+        ]
+    if region == "aligner":
+        return ["audio_tower.conv_out", "audio_tower.proj1", "audio_tower.proj2"]
+    if region == "llm":
+        return ["model", "lm_head"]
+    raise AssertionError(f"fusion (and any other region) must be handled by the caller, got {region!r}")
+
+
+def _print_train_mode_summary(model, ft_params: dict, fusion_module_names) -> None:
+    counts = {r: 0 for r in (*REGIONS, "other")}
+    for name, param in model.thinker.named_parameters():
+        if param.requires_grad:
+            counts[classify_param_region(name, fusion_module_names)] += 1
+    per_region = ", ".join(f"{r}={counts[r]} ({ft_params[r]['ft_mode']})" for r in REGIONS)
+    print(f"[apply_train_mode] trainable tensor counts: {per_region}"
+          + (f", other={counts['other']}" if counts["other"] else ""))
+
+
+def apply_train_mode(model, ft_params: dict, fusion_type: str, use_fusion: bool,
+                      lora_dropout: float = 0.05, lora_bias: str = "none"):
+    """Independently freeze / full-FT / LoRA-adapt each of the four regions
+    (encoder/fusion/aligner/llm). `ft_params` is parse_ft_params()'s output:
+    {region: {"ft_mode": "freeze"|"lora"|"full", "lr": float, "lora_r"?: int,
+    "lora_alpha"?: int}} for every region in REGIONS. Per-region lora_r/
+    lora_alpha map to PEFT's rank_pattern/alpha_pattern (per-module-pattern
+    overrides on top of one base LoraConfig) -- lora_dropout/lora_bias are
+    necessarily global across all LoRA regions (PEFT has no per-pattern
+    dropout/bias override), so those two stay plain function args."""
+    fusion_module_names = list(_FUSION_MODULE_NAMES[fusion_type]) if use_fusion else []
+    if ft_params["fusion"]["ft_mode"] != "freeze" and not use_fusion:
+        print(f"[apply_train_mode] WARNING: fusion.ft_mode={ft_params['fusion']['ft_mode']!r} "
+              f"but use_fusion=False -- there are no fusion params to train, this setting has no effect")
+
+    lora_regions = [r for r in REGIONS if ft_params[r]["ft_mode"] == "lora"]
+    full_regions = [r for r in REGIONS if ft_params[r]["ft_mode"] == "full"]
+
+    if not lora_regions:
+        # No region wants LoRA -> plain requires_grad toggling, no PEFT
+        # wrapper at all: numerically and structurally identical to a
+        # from-scratch full fine-tune (same checkpoint format verified by
+        # tests/test_fusion_save_load.py's full-FT round trip).
+        for name, param in model.thinker.named_parameters():
+            param.requires_grad = classify_param_region(name, fusion_module_names) in full_regions
+        _print_train_mode_summary(model, ft_params, fusion_module_names)
+        return model
+
+    for param in model.parameters():
+        param.requires_grad = False
+
+    target_modules = "|".join(f"(?:{_REGION_LORA_TARGET_PATTERNS[r]})" for r in lora_regions)
+
+    modules_to_save = []
+    for region in full_regions:
+        if region == "fusion":
+            modules_to_save.extend(fusion_module_names)
+        else:
+            modules_to_save.extend(_region_full_ft_module_names(region, model.thinker.audio_tower))
+
+    base_region = lora_regions[0]
+    base_r = ft_params[base_region].get("lora_r", 16)
+    base_alpha = ft_params[base_region].get("lora_alpha", 32)
+    rank_pattern, alpha_pattern = {}, {}
+    for region in lora_regions[1:]:
+        r = ft_params[region].get("lora_r", base_r)
+        alpha = ft_params[region].get("lora_alpha", base_alpha)
+        if r != base_r:
+            rank_pattern[_REGION_LORA_TARGET_PATTERNS[region]] = r
+        if alpha != base_alpha:
+            alpha_pattern[_REGION_LORA_TARGET_PATTERNS[region]] = alpha
+
+    lora_config = LoraConfig(
+        r=base_r,
+        lora_alpha=base_alpha,
+        lora_dropout=lora_dropout,
+        bias=lora_bias,
+        task_type=TaskType.CAUSAL_LM,
+        target_modules=target_modules,
+        rank_pattern=rank_pattern,
+        alpha_pattern=alpha_pattern,
+        modules_to_save=modules_to_save or None,
+    )
+    model.thinker = get_peft_model(model.thinker, lora_config)
+    model.thinker.print_trainable_parameters()
+    _print_train_mode_summary(model, ft_params, fusion_module_names)
     return model

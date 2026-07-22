@@ -6,13 +6,16 @@ import torch
 from safetensors.torch import load_file as safe_load_file
 from transformers import Trainer
 
+import modeling
+
 
 class MegaASRTrainer(Trainer):
     """Trainer for Mega-ASR LoRA SFT."""
 
     def __init__(self, *args, processor=None, base_model_path: str = "",
                  merged_from_lora_path: str = "", lr_encoder: float = 1e-5,
-                 lr_aligner: float = 1e-5, lr_llm: float = 1e-5, **kwargs):
+                 lr_aligner: float = 1e-5, lr_llm: float = 1e-5, lr_fusion: float = 1e-5,
+                 fusion_type: str = "late_gate", use_fusion: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self.processor = processor
         self.base_model_path = base_model_path
@@ -20,6 +23,10 @@ class MegaASRTrainer(Trainer):
         self.lr_encoder = lr_encoder
         self.lr_aligner = lr_aligner
         self.lr_llm = lr_llm
+        self.lr_fusion = lr_fusion
+        # Needed by classify_param_region to recognize this fusion_type's
+        # own param names (they differ per type -- see modeling._FUSION_MODULE_NAMES).
+        self._fusion_module_names = list(modeling._FUSION_MODULE_NAMES[fusion_type]) if use_fusion else []
 
     def _prepare_inputs(self, inputs):
         inputs = super()._prepare_inputs(inputs)
@@ -84,42 +91,24 @@ class MegaASRTrainer(Trainer):
             return
         return super()._load_from_checkpoint(resume_from_checkpoint, model=model)
 
-    @staticmethod
-    def _group_name(name: str) -> str:
-        # fusion_gate / conv2d1_mix operate directly on the audio tower's input
-        # or output; train them on the encoder LR schedule. Both are full-rank
-        # modules (via modules_to_save), so they have no "lora_" in their name
-        # and must be matched before the LoRA check below.
-        if "fusion_gate" in name or "conv2d1_mix" in name:
-            return "encoder"
-        if any(x in name for x in ["audio_tower.conv_out", "audio_tower.proj1", "audio_tower.proj2"]):
-            return "aligner"
-        if "lora_" in name:
-            if "audio_tower.layers." in name:
-                return "encoder"
-            if "model.layers." in name and "audio_tower.layers." not in name:
-                return "llm"
-            return "other"
-        # No "lora_" in the name: either full-parameter (no-LoRA) fine-tuning,
-        # or a base weight untouched by LoRA. Group by raw module path so
-        # --lr_encoder/--lr_aligner/--lr_llm still apply to a full fine-tune.
-        if "audio_tower." in name:
-            return "encoder"  # transformer layers, stem convs, ln_post, etc.
-        if name.startswith("model.") or name.startswith("lm_head."):
-            return "llm"
-        return "other"
-
     def create_optimizer(self):
         if self.optimizer is not None:
             return self.optimizer
 
-        groups = {"encoder": [], "aligner": [], "llm": [], "other": []}
+        # classify_param_region (modeling.py) is the SAME classifier
+        # apply_train_mode uses to decide freeze/lora/full per region, so a
+        # param's LR group here can never drift from which region actually
+        # trained it. Substring-based, so it works unchanged on this
+        # trainer's "thinker."-prefixed names, whether or not LoRA/PEFT
+        # wrapping added its own prefixes/infixes on top.
+        groups = {r: [] for r in (*modeling.REGIONS, "other")}
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                groups[self._group_name(name)].append(param)
+                region = modeling.classify_param_region(name, self._fusion_module_names)
+                groups[region].append(param)
 
-        lrs = {"encoder": self.lr_encoder, "aligner": self.lr_aligner,
-               "llm": self.lr_llm, "other": self.args.learning_rate}
+        lrs = {"encoder": self.lr_encoder, "aligner": self.lr_aligner, "llm": self.lr_llm,
+               "fusion": self.lr_fusion, "other": self.args.learning_rate}
         optim_groups = [
             {"params": params, "lr": lrs[name], "weight_decay": self.args.weight_decay}
             for name, params in groups.items() if params
