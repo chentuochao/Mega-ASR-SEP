@@ -116,6 +116,11 @@ LORA_BIAS="${LORA_BIAS:-none}"            # ditto, global across every lora regi
 WARMUP_RATIO="${WARMUP_RATIO:-0.05}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
+RESUME="${RESUME:-0}"                     # 1 to auto-resume from the latest checkpoint-N
+                                           # in OUT_DIR (finetune.py's find_latest_checkpoint) --
+                                           # use after an interrupted run; restores optimizer/
+                                           # scheduler/RNG state, continues the SAME LR schedule.
+RESUME_FROM="${RESUME_FROM:-}"            # explicit checkpoint dir; overrides RESUME's auto-pick
 
 # The one thing this script cannot default sensibly: which region does what.
 # See scripts/configs/example_ft_params.yaml for the schema; every region in
@@ -143,6 +148,10 @@ done
 OUT_DIR="${OUT_DIR:-${RUN_DIR}/${RUN_NAME}}"
 LOG_FILE="${LOG_FILE:-${OUT_DIR}/train.log}"
 mkdir -p "${OUT_DIR}"
+
+if [[ -n "$CONFIG" ]]; then
+  cp "$CONFIG" "${OUT_DIR}/$(basename "$CONFIG")"
+fi
 
 case "$FUSION_MODE" in
   none)
@@ -189,4 +198,6 @@ torchrun --nproc_per_node="${NPROC_PER_NODE}" --master_port="${MASTER_PORT}" A2S
   --max_grad_norm "${MAX_GRAD_NORM}" \
   --weight_decay "${WEIGHT_DECAY}" \
   --report_to "${REPORT_TO}" \
+  --resume "${RESUME}" \
+  --resume_from "${RESUME_FROM}" \
   2>&1 | tee -a "${LOG_FILE}"
