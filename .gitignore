@@ -29,7 +29,7 @@ checkpoints/
 *.onnx
 
 # Data and audio files
-datasets/
+#datasets/
 
 # Private files
 .env
