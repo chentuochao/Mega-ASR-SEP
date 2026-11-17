@@ -26,7 +26,22 @@ def find_latest_checkpoint(output_dir: str) -> Optional[str]:
     return best_path
 
 
-def copy_hf_files(src_dir: str, dst_dir: str):
+# Processor files whose checkpoint-local copies contain the action-token mapping.
+# Preserve these files when copying base-model configuration into a checkpoint.
+PROCESSOR_FILES = {
+    "preprocessor_config.json",
+    "processor_config.json",
+    "tokenizer_config.json",
+    "tokenizer.json",
+    "special_tokens_map.json",
+    "chat_template.json",
+    "merges.txt",
+    "vocab.json",
+    "added_tokens.json",
+}
+
+
+def copy_hf_files(src_dir: str, dst_dir: str, preserve_processor: bool = False):
     os.makedirs(dst_dir, exist_ok=True)
     for name in [
         "config.json",
@@ -40,6 +55,8 @@ def copy_hf_files(src_dir: str, dst_dir: str):
         "merges.txt",
         "vocab.json",
     ]:
+        if preserve_processor and name in PROCESSOR_FILES:
+            continue
         src = os.path.join(src_dir, name)
         if os.path.exists(src):
             shutil.copy2(src, os.path.join(dst_dir, name))
@@ -48,8 +65,9 @@ def copy_hf_files(src_dir: str, dst_dir: str):
 class MakeCheckpointInferableCallback(TrainerCallback):
     """Copy tokenizer/config files into every adapter checkpoint."""
 
-    def __init__(self, base_model_path: str):
+    def __init__(self, base_model_path: str, preserve_processor: bool = False):
         self.base_model_path = base_model_path
+        self.preserve_processor = preserve_processor
 
     def on_save(self, args: TrainingArguments, state, control, **kwargs):
         if args.process_index != 0:
@@ -59,5 +77,5 @@ class MakeCheckpointInferableCallback(TrainerCallback):
         if not os.path.isdir(ckpt_dir):
             ckpt_dir = kwargs.get("checkpoint", ckpt_dir)
 
-        copy_hf_files(self.base_model_path, ckpt_dir)
+        copy_hf_files(self.base_model_path, ckpt_dir, preserve_processor=self.preserve_processor)
         return control
