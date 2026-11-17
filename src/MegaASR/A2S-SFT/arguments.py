@@ -61,6 +61,39 @@ def parse_args():
     p.add_argument("--max_grad_norm", type=float, default=1.0)
     p.add_argument("--log_steps", type=int, default=10)
     p.add_argument("--report_to", type=str, default="none")
+    p.add_argument("--action_training", type=int, default=0,
+                   help="Enable joint action-first and transcript training. "
+                        "Requires action labels in the manifests and selects "
+                        "action_none/action_mix when --collator auto.")
+    p.add_argument("--action_loss_weight", type=float, default=1.0,
+                   help="Multiplier for the independently normalized action-span loss.")
+    p.add_argument("--action_reject_weight", type=float, default=1.0,
+                   help="Per-example weight for REJECT action tokens only. "
+                        "Transcript tokens are never class weighted. Set 0 to "
+                        "derive RESPOND_count / REJECT_count from the training manifest.")
+    p.add_argument("--action_wer_threshold", type=float, default=0.75,
+                   help="Frozen WER threshold used to build the supplied action labels; "
+                        "recorded in run_config.json for evaluation/audit.")
+    p.add_argument("--action_label_checkpoint", type=str, default="",
+                   help="Exact production checkpoint used to generate action labels. "
+                        "Action training verifies this against each manifest sidecar.")
+    p.add_argument("--action_format", type=str, default="action_first",
+                   choices=["action_first", "action_special_v1", "action_judge_v1"],
+                   help="action_judge_v1: frozen production model plus candidate-conditioned judge LoRA. "
+                        "action_first: ordinary-text 'ACTION: X\\nTRANSCRIPT: ...'. "
+                        "action_special_v1: transcript first as plain ASR, and the "
+                        "action from a separate decoder pass over [prompt] "
+                        "<|action_query|> that predicts <|action_respond|>/"
+                        "<|action_reject|> without seeing any transcript; see "
+                        "docs/action-special-token-spec.md.")
+    p.add_argument("--action_token_lr", type=float, default=1e-5,
+                   help="[action_special_v1] LR for the trainable protocol-token "
+                        "rows (respond/reject/query; own optimizer group, no "
+                        "weight decay).")
+    p.add_argument("--quality_feature_mode", type=str, default="none",
+                   choices=["none", "manifest"],
+                   help="'none' is the version-1 ablation. 'manifest' formats "
+                        "runtime-safe row['quality_context'] before the action target.")
 
     # dataloader
     p.add_argument("--num_workers", type=int, default=4)
@@ -95,10 +128,12 @@ def parse_args():
 
     # collator selection (see dataloader.py's COLLATORS registry)
     p.add_argument("--collator", type=str, default="auto",
-                   choices=["auto", "none", "mix", "white_noise_test"],
+                   choices=["auto", "none", "mix", "action_none", "action_mix",
+                            "white_noise_test"],
                    help="Which data collator to use. 'auto' (default) picks "
-                        "'mix' if --use_fusion else 'none' -- the normal "
-                        "training path. 'white_noise_test' is a diagnostic "
+                        "'action_mix'/'action_none' when --action_training is "
+                        "enabled, otherwise 'mix'/'none' according to "
+                        "--use_fusion. 'white_noise_test' is a diagnostic "
                         "probe: both streams start as the SAME clean "
                         "'libritts_path' reference audio, then get corrupted "
                         "with disjoint extreme-white-noise chunks per stream "

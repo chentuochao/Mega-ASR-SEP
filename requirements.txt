@@ -16,3 +16,5 @@ whisper_normalizer
 editdistance
 sacrebleu==1.5.1
 zhconv
+jiwer>=4,<5
+num2words==0.5.14

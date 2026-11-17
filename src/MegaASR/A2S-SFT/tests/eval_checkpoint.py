@@ -1,6 +1,11 @@
 # coding=utf-8
 """Evaluate a trained Mega-ASR-SEP checkpoint's WER/CER on a validation JSONL.
 
+Action checkpoints select their evaluator from metadata. Judge checkpoints
+default to pipeline mode with unconstrained action decoding. Use --mode cached
+for prepared saved candidates, or --task action for metadata-free action_first.
+See docs/action-model.md for the shared CLI and output measures.
+
 Loads the checkpoint via the SAME `load_qwen3_asr` used during training --
 --use_fusion/--fusion_type/--collator/--wn_seed/--language must match how the
 checkpoint was actually trained (e.g. a late-fusion checkpoint needs
@@ -24,8 +29,8 @@ Usage (run from the A2S-SFT directory):
 
     cd src/MegaASR/A2S-SFT
     CUDA_VISIBLE_DEVICES=0 python tests/eval_checkpoint.py \
-        --checkpoint_dir /home/ubuntu/Hearvana/datasets/Results_ASR/debug_none/checkpoint-8 \
-        --val_file /home/ubuntu/Hearvana/datasets/Mix_Qwen_ASR_dataset/val.jsonl
+        --checkpoint_dir /mmfs1/gscratch/intelligentsystems/daniel/results/debug_none/checkpoint-8 \
+        --val_file /scr/gigaspeech_qwen_asr_dataset/val.jsonl
 
 For a late/early fusion checkpoint:
     ... --use_fusion 1 --fusion_type late_gate
@@ -58,8 +63,11 @@ import argparse
 import json
 import os
 import re
+import statistics
 import string
+import subprocess
 import sys
+from datetime import datetime, timezone
 
 import jiwer
 import torch
@@ -67,6 +75,7 @@ from peft import PeftModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import action_format  # noqa: E402
 import modeling  # noqa: E402
 from dataloader import Qwen3ASRCollator_WhiteNoise_Test, read_audio  # noqa: E402
 from modeling import load_qwen3_asr  # noqa: E402
@@ -101,6 +110,18 @@ def normalize_string(text: str) -> str:
     for ch in string.punctuation:
         text = text.replace(ch, '')
     return ' '.join(text.split())
+
+
+def _code_revision():
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def build_prompt(processor, context="", force_language=None):
@@ -155,6 +176,10 @@ def _load_run_config(checkpoint_dir):
     if os.path.exists(candidate):
         with open(candidate) as f:
             return json.load(f), candidate
+    # Action checkpoint metadata provides a checkpoint-local configuration copy.
+    metadata = action_format.read_checkpoint_metadata(checkpoint_dir)
+    if metadata and metadata.get("run_config"):
+        return metadata["run_config"], os.path.join(checkpoint_dir, action_format.METADATA_FILENAME)
     return None, candidate
 
 
@@ -173,7 +198,16 @@ def _read_base_model_txt(checkpoint_dir):
     return None
 
 
-def _load_model_for_eval(checkpoint_dir, use_fusion, fusion_type, base_model_path):
+def _read_merged_from_lora_txt(checkpoint_dir):
+    candidate = os.path.join(checkpoint_dir, "merged_from_lora.txt")
+    if os.path.exists(candidate):
+        with open(candidate) as f:
+            return f.read().strip()
+    return None
+
+
+def _load_model_for_eval(checkpoint_dir, use_fusion, fusion_type, base_model_path,
+                         merged_from_lora_path=None):
     """Load a checkpoint for eval, transparently handling both a full model
     (this codebase's original, and still the common, case) and a PEFT
     adapter checkpoint (any modeling.py apply_train_mode region was
@@ -187,7 +221,48 @@ def _load_model_for_eval(checkpoint_dir, use_fusion, fusion_type, base_model_pat
     -- same mechanism tests/test_fusion_save_load.py's LoRA round-trip test
     already verified reloads modules_to_save/lora_A/lora_B values correctly.
 
+    action_special_v1 checkpoints use their saved processor to preserve the
+    protocol-token mapping. modeling.load_action_special_adapter reconstructs
+    the base, production adapter, action rows, and decoder adapter.
+
     Returns (model, processor, use_bf16), same shape as load_qwen3_asr."""
+    metadata = action_format.read_checkpoint_metadata(checkpoint_dir)
+    if metadata is None and os.path.exists(os.path.join(checkpoint_dir, action_format.ROWS_FILENAME)):
+        raise ValueError(
+            f"{checkpoint_dir} has {action_format.ROWS_FILENAME} but no "
+            f"{action_format.METADATA_FILENAME}; refusing a legacy fallback that would "
+            "silently drop the action rows and tokenizer mapping"
+        )
+    if metadata and metadata["action_format"] == action_format.ACTION_JUDGE_V1:
+        raise ValueError("Use eval_judge.py for judge checkpoints; ASR requires the judge adapter disabled")
+    if metadata and action_format.is_special(metadata["action_format"]):
+        if metadata.get("materialized"):
+            if _is_adapter_checkpoint(checkpoint_dir):
+                raise ValueError(f"{checkpoint_dir} claims to be a materialized export but has adapter files")
+            model, processor, use_bf16 = load_qwen3_asr(
+                checkpoint_dir, use_fusion=use_fusion, fusion_type=fusion_type
+            )
+            action_format.verify_token_mapping(
+                processor.tokenizer, metadata["protocol_tokens"],
+                forbidden_ids=modeling.reserved_model_token_ids(model, processor.tokenizer),
+            )
+            rows = metadata["vocabulary"]["embedding_rows_expanded"]
+            if modeling._vocab_dims(model) != (rows, metadata["vocabulary"]["lm_head_rows_expanded"]):
+                raise ValueError(f"Exported model dims {modeling._vocab_dims(model)} do not match "
+                                 f"the recorded expanded vocabulary")
+            return model, processor, use_bf16
+        if not _is_adapter_checkpoint(checkpoint_dir):
+            raise FileNotFoundError(f"{checkpoint_dir} is action_special_v1 but has no adapter weights")
+        base_model_path = base_model_path or metadata.get("base_model_path")
+        if merged_from_lora_path is None:
+            merged_from_lora_path = metadata.get("production_adapter_path")
+        if not base_model_path:
+            raise ValueError(f"No base model path for action_special_v1 checkpoint {checkpoint_dir}")
+        return modeling.load_action_special_adapter(
+            checkpoint_dir, metadata, use_fusion, fusion_type, base_model_path,
+            merged_from_lora_path,
+        )
+
     if not _is_adapter_checkpoint(checkpoint_dir):
         return load_qwen3_asr(checkpoint_dir, use_fusion=use_fusion, fusion_type=fusion_type)
 
@@ -201,6 +276,12 @@ def _load_model_for_eval(checkpoint_dir, use_fusion, fusion_type, base_model_pat
     print(f"[load] {checkpoint_dir} is a PEFT adapter checkpoint -- loading base "
           f"model from {base_model_path} and applying the adapter on top")
     model, processor, use_bf16 = load_qwen3_asr(base_model_path, use_fusion=use_fusion, fusion_type=fusion_type)
+    if merged_from_lora_path:
+        print(f"[load] reconstructing adapter base by merging production adapter "
+              f"{merged_from_lora_path}")
+        model.thinker = PeftModel.from_pretrained(
+            model.thinker, merged_from_lora_path, is_trainable=False
+        ).merge_and_unload()
     model.thinker = PeftModel.from_pretrained(model.thinker, checkpoint_dir, is_trainable=False)
     return model, processor, use_bf16
 
@@ -314,11 +395,74 @@ def _eval_collator_name(train_collator_name):
     return "white_noise_test" if train_collator_name == "white_noise_test" else "none"
 
 
-def main():
+def _dispatch_action_eval(args):
+    """Keep one CLI while retaining checkpoint-specific inference protocols."""
+    metadata = action_format.read_checkpoint_metadata(args.checkpoint_dir)
+    config, _ = _load_run_config(args.checkpoint_dir)
+    fmt = metadata['action_format'] if metadata else (config or {}).get('action_format')
+    enabled = (config or {}).get('action_training')
+    is_action = bool(metadata or enabled or (enabled is None and fmt))
+    task = ('action' if is_action else 'asr') if args.task == 'auto' else args.task
+    if task == 'asr':
+        if (args.mode != 'pipeline' or args.early_reject or args.decoding_mode != 'unconstrained'
+                or args.wer_threshold is not None or args.quality_feature_mode is not None):
+            raise ValueError('Action evaluation options require an action checkpoint or --task action')
+        return False
+    if not args.out_json or not args.summary_json:
+        raise ValueError('Action evaluation requires --out_json and --summary_json')
+    if args.num_shards != 1 or args.shard_index != 0 or args.skip_malformed:
+        raise ValueError('Action evaluation does not support sharding or --skip_malformed')
+    if args.collator not in (None, 'none') or args.audio_field != 'audio_sep':
+        raise ValueError('Action evaluation requires the original audio_sep/audio_mix streams')
+    if fmt == action_format.ACTION_JUDGE_V1:
+        if args.early_reject or args.quality_feature_mode not in (None, 'none'):
+            raise ValueError('Judge evaluation does not support early rejection or quality hints')
+        import eval_judge
+        eval_judge.evaluate(
+            checkpoint=args.checkpoint_dir, manifest=args.val_file,
+            out_json=args.out_json, summary_json=args.summary_json,
+            mode=args.mode, decoding_mode=args.decoding_mode,
+            max_new_tokens=args.max_new_tokens, device=args.device,
+            limit=args.limit, base_model_path=args.base_model_path,
+            production_adapter_path=args.merged_from_lora_path,
+            use_fusion=args.use_fusion, fusion_type=args.fusion_type,
+            language=args.language, sr=args.sr, wer_threshold=args.wer_threshold,
+            quiet=args.quiet,
+        )
+    else:
+        if args.mode != 'pipeline':
+            raise ValueError('Cached mode requires an action_judge_v1 checkpoint')
+        import eval_action_checkpoint
+        forwarded = ['--checkpoint_dir', args.checkpoint_dir, '--val_file', args.val_file,
+                     '--out_json', args.out_json, '--summary_json', args.summary_json,
+                     '--max_new_tokens', str(args.max_new_tokens), '--sr', str(args.sr),
+                     '--decoding_mode', args.decoding_mode]
+        for name in ('base_model_path', 'merged_from_lora_path', 'use_fusion', 'fusion_type',
+                     'language', 'quality_feature_mode', 'wer_threshold', 'device', 'limit'):
+            value = getattr(args, name)
+            if value is not None:
+                forwarded.extend(['--' + name, str(value)])
+        if args.quiet:
+            forwarded.append('--quiet')
+        if args.early_reject:
+            forwarded.append('--early_reject')
+        eval_action_checkpoint.main(forwarded)
+    return True
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint_dir", required=True)
     ap.add_argument("--val_file", required=True)
-    ap.add_argument("--use_fusion", type=int, default=None,
+    ap.add_argument('--task', choices=['auto', 'asr', 'action'], default='auto',
+                    help='Detect checkpoint metadata by default; use action for metadata-free action_first checkpoints.')
+    ap.add_argument('--mode', '--action_mode', choices=['pipeline', 'cached'], default='pipeline',
+                    help='Action judge: generate production transcripts or judge prepared saved candidates.')
+    ap.add_argument('--decoding_mode', choices=action_format.DECODING_MODES, default='unconstrained')
+    ap.add_argument('--wer_threshold', type=float, default=None)
+    ap.add_argument('--quality_feature_mode', choices=['none', 'manifest'], default=None)
+    ap.add_argument('--early_reject', action='store_true')
+    ap.add_argument("--use_fusion", type=int, choices=[0, 1], default=None,
                     help="1 to enable fusion generation. Auto-filled from "
                          "run_config.json next to --checkpoint_dir if left unset.")
     ap.add_argument("--fusion_type", default=None,
@@ -333,6 +477,10 @@ def main():
                          "(or that checkpoint's base_model.txt, for one saved "
                          "before that field existed) if left unset. Ignored "
                          "for a plain full-model checkpoint.")
+    ap.add_argument("--merged_from_lora_path", default=None,
+                    help="Production adapter merged before this checkpoint's new "
+                         "adapter was trained. Auto-filled from run_config.json or "
+                         "merged_from_lora.txt; normally do not set manually.")
     ap.add_argument("--max_new_tokens", type=int, default=256)
     ap.add_argument("--language", default=None,
                     help="force this language (e.g. English) so the model skips "
@@ -343,9 +491,26 @@ def main():
                          "run_config.json is found). Pass '' explicitly to "
                          "evaluate without any forced-language tag.")
     ap.add_argument("--limit", type=int, default=None, help="only evaluate the first N rows")
+    ap.add_argument("--skip_malformed", action="store_true",
+                    help="Skip malformed JSONL lines while preserving their global line indices.")
+    ap.add_argument("--num_shards", type=int, default=1,
+                    help="Split the (optionally limited) source rows into deterministic "
+                         "global-index modulo shards for parallel outcome generation.")
+    ap.add_argument("--shard_index", type=int, default=0,
+                    help="Zero-based shard to evaluate; requires 0 <= index < num_shards.")
     ap.add_argument("--out_json", default=None,
                     help="if set, write per-sample results (index, audio_sep path, ref, hyp, wer) "
                          "as JSON lines to this path, for downstream analysis/plotting")
+    ap.add_argument("--summary_json", default=None,
+                    help="if set, write the CORPUS-level result (checkpoint_dir, "
+                         "n_samples, corpus_wer, corpus_cer) as a single JSON object "
+                         "to this path. Machine-readable counterpart of the summary "
+                         "printed at the end -- scripts/sweep_eval.py reads this "
+                         "instead of scraping stdout.")
+    ap.add_argument("--quiet", action="store_true",
+                    help="suppress the per-sample WER/ref/hyp lines. The corpus "
+                         "summary is still printed. Use when evaluating many "
+                         "checkpoints in a loop, where the per-sample dump is noise.")
     ap.add_argument("--audio_field", default="audio_sep",
                     help="which JSONL field to read as the input audio path (default: audio_sep). "
                          "E.g. pass 'libritts_path' to evaluate on the clean pre-mix source instead.")
@@ -368,7 +533,21 @@ def main():
                          "corruption pattern, or use a different seed to check "
                          "generalization to a fresh corruption draw. Auto-filled "
                          "from run_config.json if left unset.")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+    if args.limit is not None and args.limit < 1:
+        raise ValueError('--limit must be positive')
+    if args.max_new_tokens < 1:
+        raise ValueError('--max_new_tokens must be positive')
+    destinations = [os.path.realpath(p) for p in (args.out_json, args.summary_json) if p]
+    if len(set(destinations)) != len(destinations) or os.path.realpath(args.val_file) in destinations:
+        raise ValueError('Prediction, summary, and input manifest paths must be different')
+    if _dispatch_action_eval(args):
+        return
+    if args.num_shards < 1 or not 0 <= args.shard_index < args.num_shards:
+        raise ValueError(
+            f"Invalid shard selection: shard_index={args.shard_index}, "
+            f"num_shards={args.num_shards}"
+        )
 
     run_config, run_config_path = _load_run_config(args.checkpoint_dir)
     if run_config is not None:
@@ -392,6 +571,11 @@ def main():
             (run_config.get("model_path") if run_config else None)
             or _read_base_model_txt(args.checkpoint_dir)
         )
+    if args.merged_from_lora_path is None:
+        args.merged_from_lora_path = (
+            (run_config.get("merged_from_lora_path") if run_config else None)
+            or _read_merged_from_lora_txt(args.checkpoint_dir)
+        )
 
     if args.collator == "white_noise_test" and not args.use_fusion:
         raise ValueError(
@@ -402,14 +586,42 @@ def main():
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     model, processor, _ = _load_model_for_eval(
-        args.checkpoint_dir, bool(args.use_fusion), args.fusion_type, args.base_model_path
+        args.checkpoint_dir, bool(args.use_fusion), args.fusion_type,
+        args.base_model_path, args.merged_from_lora_path,
     )
     model.to(device).eval()
+    if device == 'cpu':
+        model.float()
     print(describe_model(model, bool(args.use_fusion), args.fusion_type, device))
 
-    rows = [json.loads(line) for line in open(args.val_file)]
+    rows = []
+    malformed_indices = []
+    with open(args.val_file) as source_handle:
+        for global_index, line in enumerate(source_handle):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                if not args.skip_malformed:
+                    raise ValueError(
+                        f"Malformed JSON at {args.val_file}:{global_index + 1}: {exc}"
+                    ) from exc
+                malformed_indices.append(global_index)
+                continue
+            rows.append((global_index, row))
     if args.limit:
         rows = rows[: args.limit]
+    indexed_rows = [
+        (global_index, row)
+        for global_index, row in rows
+        if global_index % args.num_shards == args.shard_index
+    ]
+    if not indexed_rows:
+        raise ValueError('No samples selected for evaluation')
+    for output in (args.out_json, args.summary_json):
+        if output:
+            os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
 
     # Reuse the EXACT training-time masking code (not a reimplementation) so
     # eval audio is constructed identically to what the checkpoint was
@@ -423,8 +635,8 @@ def main():
 
     out_f = open(args.out_json, "w") if args.out_json else None
 
-    refs_n, hyps_n = [], []
-    for i, row in enumerate(rows):
+    refs_n, hyps_n, utterance_wers = [], [], []
+    for i, row in indexed_rows:
         if wn_collator is not None:
             audios, audios_mix, _ = wn_collator._load_masked_channels([row])
             sep_audio, mix_audio = audios[0], audios_mix[0]
@@ -441,14 +653,16 @@ def main():
                           max_new_tokens=args.max_new_tokens, language=args.language)
         ref = row["text"]
         ref_n, hyp_n = normalize_string(ref), normalize_string(hyp)
-        sample_wer = jiwer.wer(ref_n, hyp_n) if ref_n.strip() else float("nan")
+        sample_wer = jiwer.wer(ref_n, hyp_n)
+        utterance_wers.append(sample_wer)
 
         refs_n.append(ref_n)
         hyps_n.append(hyp_n)
 
-        print(f"[{i:04d}] WER={sample_wer:.3f}")
-        print(f"  ref: {ref_n}")
-        print(f"  hyp: {hyp_n}")
+        if not args.quiet:
+            print(f"[{i:04d}] WER={sample_wer:.3f}")
+            print(f"  ref: {ref_n}")
+            print(f"  hyp: {hyp_n}")
 
         if out_f is not None:
             out_f.write(json.dumps({
@@ -465,9 +679,40 @@ def main():
 
     corpus_wer = jiwer.wer(refs_n, hyps_n)
     corpus_cer = jiwer.cer(refs_n, hyps_n)
-    print(f"\n=== {len(rows)} samples ===")
+    print(f"\n=== {len(indexed_rows)} samples (shard {args.shard_index}/{args.num_shards}) ===")
     print(f"corpus WER (normalized): {corpus_wer:.4f}")
     print(f"corpus CER (normalized): {corpus_cer:.4f}")
+    print(f"mean utterance WER: {statistics.mean(utterance_wers):.4f}")
+    print(f"median utterance WER: {statistics.median(utterance_wers):.4f}")
+
+    if args.summary_json:
+        # Write aggregate metrics after every selected sample has been evaluated.
+        os.makedirs(os.path.dirname(os.path.abspath(args.summary_json)), exist_ok=True)
+        with open(args.summary_json, "w") as f:
+            json.dump({
+                "checkpoint_dir": os.path.abspath(args.checkpoint_dir),
+                "val_file": os.path.abspath(args.val_file),
+                "generated_utc": datetime.now(timezone.utc).isoformat(),
+                "code_revision": _code_revision(),
+                "use_fusion": bool(args.use_fusion),
+                "fusion_type": args.fusion_type,
+                "collator": args.collator,
+                "language": args.language,
+                "sampling_rate": args.sr,
+                "normalization": "normalize_string_v1",
+                "n_samples": len(indexed_rows),
+                "source_rows_before_sharding": len(rows),
+                "malformed_source_indices_skipped": malformed_indices,
+                "num_shards": args.num_shards,
+                "shard_index": args.shard_index,
+                "corpus_wer": corpus_wer,
+                "corpus_cer": corpus_cer,
+                "mean_utterance_wer": statistics.mean(utterance_wers),
+                "median_utterance_wer": statistics.median(utterance_wers),
+                "max_new_tokens": args.max_new_tokens,
+                "do_sample": False,
+            }, f, indent=2)
+        print(f"[summary_json] wrote {args.summary_json}")
 
 
 if __name__ == "__main__":
