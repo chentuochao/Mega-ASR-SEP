@@ -5,6 +5,8 @@
 
 <h1 align="center">Mega-ASR: Towards In-the-Wild^2 Speech Recognition via Scaling Up Real-world Acoustic Simulation</h1>
 
+See [End-to-end action and QA evaluation](PIPELINE.md) for ASR, RESPOND/REJECT routing, and VoiceBench QA scoring.
+
 <div align="center">
   <a href="https://huggingface.co/papers/2605.19833">
     <img src="assets/huggingface_paper_gold_day.svg"/>

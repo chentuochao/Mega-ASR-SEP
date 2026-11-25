@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/zli12321/qa_metrics",
+  "revision": "26623c6ca3313e7a58c48fd6ce2b8579eb0c742e",
+  "qa_metrics_version": "0.2.17",
+  "upstream_paths": {
+    "lr_classifier.pkl": "qa_metrics/classifier/lr_classifier",
+    "tf-idf_vectorizer.pkl": "qa_metrics/classifier/tf-idf_vectorizer"
+  },
+  "sha256": {
+    "lr_classifier.pkl": "9c3dd5998745ece1cfb6cb16b953358f794e8716d63a08f3b212d8bc32a59b8b",
+    "tf-idf_vectorizer.pkl": "e886c9ba3ddb15a4b693b075dfe19cfad36dc74e7f8f195b8d9e98e989f2ba4f"
+  }
+}

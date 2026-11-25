@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/MatthewCYM/VoiceBench",
+  "revision": "b56154172f2a57a43d29005de7d0471d748d70d1",
+  "downloaded_utc": "2026-11-20T08:58:02.151291+00:00",
+  "upstream_paths": {
+    "qa.py": "src/evaluator/qa.py",
+    "base.py": "src/evaluator/base.py",
+    "api_judge.py": "api_judge.py",
+    "naive.py": "src/models/naive.py",
+    "LICENSE": "LICENSE",
+    "requirements.txt": "requirements.txt"
+  },
+  "sha256": {
+    "qa.py": "53c2658536e9c8e63c69ca05281a909d3d0c33cc9c3624b2fc867cbaa9c86a1e",
+    "base.py": "82e69f081bd3c5c41514d4156ff86bcdad80806e8a4582f51f6be0b3d78c52dc",
+    "api_judge.py": "32fbcca50acb7cf6781b31c691f9b4f9ae9fb8a2f0bb8be71192a3d5d49169cd",
+    "naive.py": "60b8cab6668e523dba39baba5d8b66f2e10b7f1a3263de93d0640ea46bb23e14",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "requirements.txt": "74ba92fad3ad712f61e6dd56070090daac040678d6a8d3154f8ce8b8564e72e1"
+  }
+}

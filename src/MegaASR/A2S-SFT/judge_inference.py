@@ -1,4 +1,6 @@
 """Frozen production transcription followed by transcript-conditioned judging."""
+from time import perf_counter
+
 import torch
 
 import action_format
@@ -39,7 +41,8 @@ def judge_candidate(model, processor, sep_audio, mix_audio, candidate,
 
 @torch.no_grad()
 def transcribe_and_judge(model, judge_processor, production_processor, sep_audio, mix_audio,
-                         language='English', max_new_tokens=256, decoding_mode='unconstrained'):
+                         language='English', max_new_tokens=256, decoding_mode='unconstrained',
+                         measure_time=False):
     """Transcribe in production mode, then judge in a separate decoder context.
 
     Transcription uses the base processor and disables judge LoRA and row
@@ -48,6 +51,12 @@ def transcribe_and_judge(model, judge_processor, production_processor, sep_audio
     """
     if model.training:
         raise ValueError('Call model.eval() before inference')
+    def timestamp():
+        if next(model.parameters()).device.type == 'cuda':
+            torch.cuda.synchronize(next(model.parameters()).device)
+        return perf_counter()
+
+    started = timestamp() if measure_time else None
     prompt = _model_prefix(production_processor, {}, language, 'none')
     inputs = production_processor(text=[prompt], audio=[sep_audio], return_tensors='pt', padding=True)
     mix = production_processor(text=[prompt], audio=[mix_audio], return_tensors='pt', padding=True)
@@ -60,10 +69,14 @@ def transcribe_and_judge(model, judge_processor, production_processor, sep_audio
     continuation = sequences[0, inputs['input_ids'].shape[1]:].tolist()
     candidate = production_processor.tokenizer.decode(continuation, skip_special_tokens=True,
                                                       clean_up_tokenization_spaces=False)
+    transcribed = timestamp() if measure_time else None
     result = judge_candidate(model, judge_processor, sep_audio, mix_audio, candidate,
                              language, decoding_mode)
     eos = modeling.generation_eos_ids(production_processor.tokenizer)
     result['transcript_complete'] = bool(continuation and continuation[-1] in eos)
     if not result['transcript_complete']:
         result['effective_action'] = 'REJECT'
+    if measure_time:
+        finished = timestamp()
+        result['stage_seconds'] = {'asr': transcribed - started, 'judge': finished - transcribed}
     return result
